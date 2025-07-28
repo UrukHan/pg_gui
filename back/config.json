@@ -1,0 +1,55 @@
+{
+  "tables": [
+    {
+      "name": "Users",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uint"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "mail",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "Events",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "Test",
+      "fields": [
+        {
+          "name": "user_id",
+          "type": "int"
+        },
+        {
+          "name": "Event",
+          "type": "string"
+        },
+        {
+          "name": "test",
+          "type": "string"
+        },
+        {
+          "name": "trst",
+          "type": "string"
+        }
+      ]
+    }
+  ]
+}
