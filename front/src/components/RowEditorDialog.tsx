@@ -11,6 +11,9 @@ interface Props {
     onSave: (data: any) => void;
 }
 
+const ASSET_FIELDS = new Set(['image_links', 'file_links']);
+const notAsset = (name: string) => !ASSET_FIELDS.has(name);
+
 export default function RowEditorDialog({ open, data, fields, onClose, onSave }: Props) {
     const [formData, setFormData] = useState<any>({});
 

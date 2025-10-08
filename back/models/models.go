@@ -5,13 +5,20 @@ import (
 	"io/ioutil"
 )
 
+type ForeignKey struct {
+	Table    string `json:"table"`
+	Field    string `json:"field"`
+	OnDelete string `json:"onDelete"` // RESTRICT | CASCADE | SET NULL
+}
+
 type Field struct {
-	Name       string `json:"name"`
-	Type       string `json:"type"`
-	PrimaryKey bool   `json:"primaryKey,omitempty"`
-	Nullable   bool   `json:"nullable,omitempty"`
-	Default    string `json:"default,omitempty"`
-	Unique     bool   `json:"unique,omitempty"`
+	Name       string      `json:"name"`
+	Type       string      `json:"type"`
+	PrimaryKey bool        `json:"primaryKey,omitempty"`
+	Nullable   bool        `json:"nullable,omitempty"`
+	Default    string      `json:"default,omitempty"`
+	Unique     bool        `json:"unique,omitempty"`
+	ForeignKey *ForeignKey `json:"foreignKey,omitempty"`
 }
 
 type Table struct {

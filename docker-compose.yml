@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: pg-ariadna
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ariadna
+      POSTGRES_PASSWORD: ariadna
+      POSTGRES_DB: ariadna
+      TZ: Europe/Moscow
+      LANG: en_US.utf8
+    ports:
+      - "5435:5432"
+    # ❗ заменили bind-mount на named volume
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Скрипты инициализации можно оставить bind-mount (read-only ок для Windows)
+      - ./initdb:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ariadna -d ariadna"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

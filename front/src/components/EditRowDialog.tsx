@@ -12,6 +12,9 @@ interface Props {
     onSave: (data: Record<string, any>) => void;
 }
 
+const ASSET_FIELDS = new Set(['image_links', 'file_links']);
+const notAsset = (name: string) => !ASSET_FIELDS.has(name);
+
 export default function EditRowDialog({ open, data, fields, onClose, onSave }: Props) {
     const [formData, setFormData] = useState<Record<string, any>>(data || {});
 

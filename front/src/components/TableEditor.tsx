@@ -1,5 +1,3 @@
-// src/components/TableEditor.tsx
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -10,8 +8,11 @@ import axios from 'axios';
 const API_ROOT = process.env.NEXT_PUBLIC_API_URL!;
 const SCHEMA_URL = `${API_ROOT}/schema`;
 
-const types = ['uint', 'int', 'float', 'string', 'bool', 'text'];
+const types = ['uint', 'int', 'float', 'string', 'bool', 'text', 'text_array'];
 const onDeleteOptions = ['RESTRICT', 'CASCADE', 'SET NULL'];
+
+const ASSET_FIELDS = new Set(['image_links', 'file_links']);
+const notAsset = (name: string) => !ASSET_FIELDS.has(name);
 
 interface Props {
     table: Table;
@@ -37,13 +38,10 @@ export default function TableEditor({ table, onSave, onCancel }: Props) {
     const addField = () => {
         setCurrentTable({
             ...currentTable,
-            fields: [...currentTable.fields, {
-                name: '',
-                type: 'string',
-                nullable: false,
-                unique: false,
-                default: '',
-            }]
+            fields: [
+                ...currentTable.fields,
+                { name: '', type: 'string', nullable: false, unique: false, default: '' }
+            ],
         });
     };
 
@@ -53,7 +51,10 @@ export default function TableEditor({ table, onSave, onCancel }: Props) {
 
     const getFieldsForForeignTable = (tableName: string) => {
         const foreignTable = existingTables.find(t => t.name === tableName);
-        return foreignTable ? foreignTable.fields : [];
+        const fields = foreignTable ? foreignTable.fields || [] : [];
+        const hasId = fields.some(f => f.name === 'id');
+        const base = hasId ? fields : [{ name: 'id', type: 'uint' } as Field, ...fields];
+        return base.filter(f => notAsset(f.name));
     };
 
     return (
@@ -69,7 +70,7 @@ export default function TableEditor({ table, onSave, onCancel }: Props) {
             </Tooltip>
 
             {currentTable.fields
-                .filter(field => field.name !== 'id')
+                .filter(field => field.name !== 'id' && notAsset(field.name))
                 .map((field, idx) => (
                     <Box key={idx} sx={{ border: '1px solid #ddd', borderRadius: 1, p: 1, mb: 1 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: '1%' }}>
@@ -90,7 +91,11 @@ export default function TableEditor({ table, onSave, onCancel }: Props) {
                                     size="small"
                                     fullWidth
                                 >
-                                    {types.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+                                    {types.map(t => (
+                                        <MenuItem key={t} value={t}>
+                                            {t}
+                                        </MenuItem>
+                                    ))}
                                 </Select>
                             </Box>
 
@@ -106,70 +111,89 @@ export default function TableEditor({ table, onSave, onCancel }: Props) {
                             </Box>
 
                             <Box sx={{ width: '14%' }}>
-                                <Typography variant="caption" align="center">FK Table</Typography>
+                                <Typography variant="caption" align="center">
+                                    FK Table
+                                </Typography>
                                 <Select
                                     value={field.foreignKey?.table || ''}
                                     displayEmpty
                                     size="small"
-                                    onChange={e => handleFieldChange(idx, {
-                                        foreignKey: {
-                                            table: e.target.value,
-                                            field: '',
-                                            onDelete: 'RESTRICT'
-                                        }
-                                    })}
+                                    onChange={e =>
+                                        handleFieldChange(idx, {
+                                            foreignKey: { table: e.target.value, field: '', onDelete: 'RESTRICT' },
+                                        })
+                                    }
                                     fullWidth
                                 >
                                     <MenuItem value="">None</MenuItem>
-                                    {existingTables.map(t => <MenuItem key={t.name} value={t.name}>{t.name}</MenuItem>)}
+                                    {existingTables.map(t => (
+                                        <MenuItem key={t.name} value={t.name}>
+                                            {t.name}
+                                        </MenuItem>
+                                    ))}
                                 </Select>
                             </Box>
 
                             <Box sx={{ width: '10%' }}>
-                                <Typography variant="caption" align="center">FK Field</Typography>
+                                <Typography variant="caption" align="center">
+                                    FK Field
+                                </Typography>
                                 <Select
                                     value={field.foreignKey?.field || ''}
                                     displayEmpty
                                     size="small"
                                     disabled={!field.foreignKey?.table}
-                                    onChange={e => handleFieldChange(idx, {
-                                        foreignKey: {
-                                            ...field.foreignKey!,
-                                            field: e.target.value
-                                        }
-                                    })}
+                                    onChange={e =>
+                                        handleFieldChange(idx, {
+                                            foreignKey: { ...(field.foreignKey as any), field: e.target.value },
+                                        })
+                                    }
                                     fullWidth
                                 >
                                     <MenuItem value="">None</MenuItem>
                                     {getFieldsForForeignTable(field.foreignKey?.table || '').map(f => (
-                                        <MenuItem key={f.name} value={f.name}>{f.name}</MenuItem>
+                                        <MenuItem key={f.name} value={f.name}>
+                                            {f.name}
+                                        </MenuItem>
                                     ))}
                                 </Select>
                             </Box>
 
                             <Box sx={{ width: '16%' }}>
-                                <Typography variant="caption" align="center">ON DELETE</Typography>
+                                <Typography variant="caption" align="center">
+                                    ON DELETE
+                                </Typography>
                                 <Select
                                     value={field.foreignKey?.onDelete || 'RESTRICT'}
                                     size="small"
                                     disabled={!field.foreignKey?.table}
-                                    onChange={e => handleFieldChange(idx, {
-                                        foreignKey: {
-                                            ...field.foreignKey!,
-                                            onDelete: e.target.value
-                                        }
-                                    })}
+                                    onChange={e =>
+                                        handleFieldChange(idx, {
+                                            foreignKey: { ...(field.foreignKey as any), onDelete: e.target.value as any },
+                                        })
+                                    }
                                     fullWidth
                                 >
-                                    {onDeleteOptions.map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
+                                    {onDeleteOptions.map(opt => (
+                                        <MenuItem key={opt} value={opt}>
+                                            {opt}
+                                        </MenuItem>
+                                    ))}
                                 </Select>
                             </Box>
 
                             <Box sx={{ width: '11%', textAlign: 'center' }}>
-                                <Button color="error" onClick={() => setCurrentTable({
-                                    ...currentTable,
-                                    fields: currentTable.fields.filter((_, i) => i !== idx)
-                                })}>Remove</Button>
+                                <Button
+                                    color="error"
+                                    onClick={() =>
+                                        setCurrentTable({
+                                            ...currentTable,
+                                            fields: currentTable.fields.filter((_, i) => i !== idx),
+                                        })
+                                    }
+                                >
+                                    Remove
+                                </Button>
                             </Box>
                         </Box>
 
@@ -188,11 +212,17 @@ export default function TableEditor({ table, onSave, onCancel }: Props) {
                     </Box>
                 ))}
 
-            <Button variant="outlined" onClick={addField}>Add Field</Button>
+            <Button variant="outlined" onClick={addField}>
+                Add Field
+            </Button>
 
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
-                <Button variant="contained" sx={{ bgcolor: 'purple', color: 'white' }} onClick={onCancel}>Cancel</Button>
-                <Button variant="contained" color="primary" onClick={handleSave}>Save Table</Button>
+                <Button variant="contained" sx={{ bgcolor: 'purple', color: 'white' }} onClick={onCancel}>
+                    Cancel
+                </Button>
+                <Button variant="contained" color="primary" onClick={handleSave}>
+                    Save Table
+                </Button>
             </Box>
         </Box>
     );

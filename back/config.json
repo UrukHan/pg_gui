@@ -1,53 +1,53 @@
 {
   "tables": [
     {
-      "name": "Users",
+      "name": "User",
       "fields": [
         {
-          "name": "id",
-          "type": "uint"
-        },
-        {
-          "name": "name",
+          "name": "Name",
           "type": "string"
         },
         {
-          "name": "mail",
+          "name": "Role",
           "type": "string"
+        },
+        {
+          "name": "image_links",
+          "type": "text_array",
+          "nullable": true
+        },
+        {
+          "name": "file_links",
+          "type": "text_array",
+          "nullable": true
         }
       ]
     },
     {
-      "name": "Events",
+      "name": "Project",
       "fields": [
         {
-          "name": "id",
+          "name": "Name",
           "type": "string"
         },
         {
-          "name": "name",
-          "type": "string"
-        }
-      ]
-    },
-    {
-      "name": "Test",
-      "fields": [
-        {
-          "name": "user_id",
-          "type": "int"
+          "name": "Owner",
+          "type": "int",
+          "foreignKey": {
+            "table": "User",
+            "field": "id",
+            "onDelete": "RESTRICT"
+          }
         },
         {
-          "name": "Event",
-          "type": "string"
+          "name": "file_links",
+          "type": "text_array",
+          "nullable": true
         },
         {
-          "name": "test",
-          "type": "string"
-        },
-        {
-          "name": "trst",
-          "type": "string"
+          "name": "image_links",
+          "type": "text_array",
+          "nullable": true
         }
       ]
     }

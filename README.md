@@ -1,5 +1,5 @@
 # pg_gui
 
-go run cmd/main.go
+go run main.go
 
 npm run dev 
