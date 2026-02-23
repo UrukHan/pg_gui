@@ -1,19 +1,19 @@
 // app/layout.tsx
 import "./globals.css";
-import { SchemaProvider } from '@/context/SchemaContext';
+import { AuthProvider } from '@/context/AuthContext';
 
 export const metadata = {
-    title: "Postgres GUI",
-    description: "Dynamic table editor",
+    title: "Ariadna Lab",
+    description: "Управление приборами и экспериментами",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
     return (
-        <html lang="en">
+        <html lang="ru">
         <body>
-        <SchemaProvider>
+        <AuthProvider>
             {children}
-        </SchemaProvider>
+        </AuthProvider>
         </body>
         </html>
     );

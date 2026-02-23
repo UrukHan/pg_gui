@@ -22,5 +22,33 @@ services:
       timeout: 3s
       retries: 10
 
+  backend:
+    build: ./back
+    container_name: pg-ariadna-back
+    restart: unless-stopped
+    environment:
+      DATABASE_DSN: "host=postgres user=ariadna password=ariadna dbname=ariadna port=5432 sslmode=disable"
+    ports:
+      - "8080:8080"
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./front
+      args:
+        NEXT_PUBLIC_API_URL: "http://localhost:8080"
+        NEXT_PUBLIC_ROWS_PER_PAGE: "20"
+    container_name: pg-ariadna-front
+    restart: unless-stopped
+    ports:
+      - "8070:3000"
+    depends_on:
+      - backend
+
 volumes:
   pgdata:
+  uploads:

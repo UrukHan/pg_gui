@@ -1,145 +1,187 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Box, Paper, Button, Dialog, DialogActions, DialogContent, DialogTitle, Select, MenuItem, Typography } from '@mui/material';
-import Image from 'next/image';
-import axios from 'axios';
-import TablesManager from '@/components/TablesManager';
-import TableEditorDialog from '@/components/TableEditorDialog';
-import { Table } from '@/components/types';
-import { useSchema } from '@/context/SchemaContext';
+import { useState, ComponentType } from 'react';
+import {
+  Box, Paper, TextField, Button, Typography, CircularProgress,
+  BottomNavigation, BottomNavigationAction, AppBar, Toolbar, IconButton, Menu, MenuItem,
+  useMediaQuery, useTheme,
+} from '@mui/material';
+import ScienceIcon from '@mui/icons-material/Science';
+import TableChartIcon from '@mui/icons-material/TableChart';
+import TimelineIcon from '@mui/icons-material/Timeline';
+import LogoutIcon from '@mui/icons-material/Logout';
+import PersonIcon from '@mui/icons-material/Person';
+import dynamic from 'next/dynamic';
+import { useAuth } from '@/context/AuthContext';
+import InstrumentsTab from '@/components/InstrumentsTab';
+import TablesTab from '@/components/TablesTab';
 
-const API_ROOT = process.env.NEXT_PUBLIC_API_URL!;
-const SCHEMA_URL = `${API_ROOT}/schema`;
+const GraphsTab = dynamic<{ experimentId: number | null }>(
+  () => import('@/components/GraphsTab') as Promise<{ default: ComponentType<{ experimentId: number | null }> }>,
+  { ssr: false }
+);
 
 export default function Home() {
-    const [columns, setColumns] = useState<1 | 2 | 3 | null>(null);
-    const [createDialogOpen, setCreateDialogOpen] = useState(false);
-    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-    const [tableToDelete, setTableToDelete] = useState('');
-    const [message, setMessage] = useState<{ text: string, type: 'error' | 'success' } | null>(null);
+  const { user, loading, login, logout } = useAuth();
+  const [tab, setTab] = useState(0);
+  const [loginForm, setLoginForm] = useState({ login: '', password: '' });
+  const [loginError, setLoginError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  // For graphs tab: which experiment to show
+  const [graphExperimentId, setGraphExperimentId] = useState<number | null>(null);
 
-    const { schema, reloadSchema } = useSchema();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-    useEffect(() => {
-        if (!schema.tables.find(table => table.name === tableToDelete)) {
-            setTableToDelete('');
-        }
-    }, [schema, tableToDelete]);
-
-    useEffect(() => {
-        setColumns(3);
-        reloadSchema();
-    }, []);
-
-    if (columns === null) {
-        return null;
+  const handleLogin = async () => {
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      await login(loginForm.login, loginForm.password);
+    } catch (e: any) {
+      setLoginError(e.response?.data?.error || 'Ошибка авторизации');
+    } finally {
+      setLoginLoading(false);
     }
+  };
 
-    const handleCreateTable = () => {
-        setCreateDialogOpen(true);
-    };
+  const openGraphs = (experimentId: number) => {
+    setGraphExperimentId(experimentId);
+    setTab(2);
+  };
 
-    const handleTableSave = async (updatedTable: Table, renameFrom?: string, renameTo?: string) => {
-        setCreateDialogOpen(false);
-
-        const payload = {
-            tables: schema.tables.some(t => t.name === renameFrom)
-                ? schema.tables.map(tbl => tbl.name === renameFrom ? updatedTable : tbl)
-                : [...schema.tables, updatedTable],
-            renameFrom: renameFrom || '',
-            renameTo: renameTo || '',
-        };
-
-        try {
-            const res = await axios.post(SCHEMA_URL, payload);
-            if (res.status === 200) {
-                setMessage({ text: 'Table saved successfully', type: 'success' });
-                await reloadSchema(); // обновляем глобально
-            } else {
-                setMessage({ text: 'Failed to save table', type: 'error' });
-            }
-        } catch (error: any) {
-            setMessage({ text: error.response?.data?.error || 'Error saving table', type: 'error' });
-        }
-    };
-
-    const handleDeleteTable = async () => {
-        if (tableToDelete) {
-            try {
-                await axios.delete(`${SCHEMA_URL}/${tableToDelete}`);
-                setMessage({ text: 'Table deleted successfully', type: 'success' });
-                setDeleteDialogOpen(false);
-                await reloadSchema(); // обновляем глобально
-            } catch (err: any) {
-                setMessage({ text: err.response?.data?.error || 'Error deleting table', type: 'error' });
-            }
-        }
-    };
-
+  if (loading) {
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-            <Box sx={{ height: '7%', px: 2, bgcolor: 'grey.900', display: 'flex', alignItems: 'center' }}>
-                <Box sx={{ position: 'relative', height: '80%', width: 'auto', aspectRatio: '3 / 1' }}>
-                    <Image
-                        src="/images/logo.png"
-                        alt="Logo"
-                        fill
-                        sizes="(max-width: 768px) 100vw, 33vw"
-                        style={{ objectFit: 'contain' }}
-                    />
-                </Box>
-            </Box>
-
-            <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', height: '93%' }}>
-                <Paper sx={{ height: '5%', display: 'flex', alignItems: 'center', bgcolor: 'grey.300', pt: 2, px: 2, gap: 1 }}>
-                    {[1, 2, 3].map(num => (
-                        <Button key={num} variant={columns === num ? 'contained' : 'outlined'} onClick={() => setColumns(num as 1 | 2 | 3)}>
-                            {num} Column{num > 1 ? 's' : ''}
-                        </Button>
-                    ))}
-
-                    <Box sx={{ flexGrow: 1 }} />
-
-                    <Typography sx={{ flexGrow: 1, textAlign: 'center', bgcolor: message?.type === 'error' ? 'red' : message?.type === 'success' ? 'green' : '#fff' }}>
-                        {message ? message.text : 'Awaiting action...'}
-                    </Typography>
-
-                    <Box sx={{ flexGrow: 1 }} />
-
-                    <Button variant="contained" onClick={handleCreateTable}>Create Table</Button>
-                    <Button variant="contained" sx={{ bgcolor: 'purple', color: 'white' }} onClick={() => setDeleteDialogOpen(true)}>Delete Table</Button>
-                </Paper>
-
-                <Box sx={{ flexGrow: 1, overflow: 'hidden', bgcolor: 'grey.300' }}>
-                    <TablesManager
-                        key={JSON.stringify(schema)}
-                        columns={columns}
-                        schema={schema}
-                        setMessage={setMessage}
-                    />
-                </Box>
-            </Box>
-
-            <TableEditorDialog
-                open={createDialogOpen}
-                table={{ name: '', fields: [] }}
-                onClose={() => setCreateDialogOpen(false)}
-                onSave={handleTableSave}
-            />
-
-            <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-                <DialogTitle>Delete Table</DialogTitle>
-                <DialogContent>
-                    <Select fullWidth value={tableToDelete} onChange={e => setTableToDelete(e.target.value)}>
-                        {schema.tables.map(table => <MenuItem key={table.name} value={table.name}>{table.name}</MenuItem>)}
-                    </Select>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-                    <Button color="error" onClick={handleDeleteTable}>Delete</Button>
-                </DialogActions>
-            </Dialog>
-        </Box>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
     );
+  }
+
+  // --- Login screen ---
+  if (!user) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: '#1a1a2e' }}>
+        <Paper sx={{ p: 4, maxWidth: 400, width: '100%', mx: 2 }}>
+          <Typography variant="h5" align="center" gutterBottom fontWeight={700}>
+            Ariadna Lab
+          </Typography>
+          <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 3 }}>
+            Вход в систему
+          </Typography>
+          <TextField
+            label="Логин"
+            fullWidth
+            sx={{ mb: 2 }}
+            value={loginForm.login}
+            onChange={(e) => setLoginForm({ ...loginForm, login: e.target.value })}
+            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+          />
+          <TextField
+            label="Пароль"
+            type="password"
+            fullWidth
+            sx={{ mb: 2 }}
+            value={loginForm.password}
+            onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+          />
+          {loginError && (
+            <Typography color="error" variant="body2" sx={{ mb: 2 }}>
+              {loginError}
+            </Typography>
+          )}
+          <Button
+            variant="contained"
+            fullWidth
+            size="large"
+            onClick={handleLogin}
+            disabled={loginLoading}
+          >
+            {loginLoading ? <CircularProgress size={24} /> : 'Войти'}
+          </Button>
+        </Paper>
+      </Box>
+    );
+  }
+
+  // --- Main app ---
+  const tabs = [
+    { label: 'Приборы', icon: <ScienceIcon /> },
+    { label: 'Таблицы', icon: <TableChartIcon /> },
+    { label: 'Графики', icon: <TimelineIcon /> },
+  ];
+
+  const tabContent = (
+    <Box sx={{ flexGrow: 1, overflow: 'auto', p: { xs: 1, md: 2 } }}>
+      {tab === 0 && <InstrumentsTab />}
+      {tab === 1 && <TablesTab onOpenGraphs={openGraphs} />}
+      {tab === 2 && <GraphsTab experimentId={graphExperimentId} />}
+    </Box>
+  );
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      {/* Header */}
+      <AppBar position="static" sx={{ bgcolor: '#1a1a2e' }}>
+        <Toolbar variant="dense">
+          <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>
+            Ariadna Lab
+          </Typography>
+
+          {/* Desktop tabs */}
+          {!isMobile && tabs.map((t, i) => (
+            <Button
+              key={i}
+              startIcon={t.icon}
+              onClick={() => setTab(i)}
+              sx={{
+                color: tab === i ? '#90caf9' : '#ffffff99',
+                borderBottom: tab === i ? '2px solid #90caf9' : 'none',
+                borderRadius: 0,
+                mx: 0.5,
+                textTransform: 'none',
+              }}
+            >
+              {t.label}
+            </Button>
+          ))}
+
+          <IconButton color="inherit" onClick={(e) => setAnchorEl(e.currentTarget)}>
+            <PersonIcon />
+          </IconButton>
+          <Menu
+            anchorEl={anchorEl}
+            open={Boolean(anchorEl)}
+            onClose={() => setAnchorEl(null)}
+          >
+            <MenuItem disabled>
+              {user.first_name} {user.last_name} ({user.role})
+            </MenuItem>
+            <MenuItem onClick={() => { setAnchorEl(null); logout(); }}>
+              <LogoutIcon sx={{ mr: 1 }} /> Выйти
+            </MenuItem>
+          </Menu>
+        </Toolbar>
+      </AppBar>
+
+      {/* Content */}
+      {tabContent}
+
+      {/* Mobile bottom navigation */}
+      {isMobile && (
+        <BottomNavigation
+          value={tab}
+          onChange={(_, v) => setTab(v)}
+          showLabels
+          sx={{ borderTop: '1px solid #e0e0e0' }}
+        >
+          {tabs.map((t, i) => (
+            <BottomNavigationAction key={i} label={t.label} icon={t.icon} />
+          ))}
+        </BottomNavigation>
+      )}
+    </Box>
+  );
 }
