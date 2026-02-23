@@ -33,7 +33,10 @@ func Init() {
 		log.Fatal("Auto-migration failed:", err)
 	}
 
-	// Seed default admin if none exists
+	seedAdmin()
+}
+
+func seedAdmin() {
 	var count int64
 	DB.Model(&models.User{}).Where("role = ?", models.RoleAdmin).Count(&count)
 	if count == 0 {

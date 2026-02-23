@@ -15,7 +15,7 @@ import (
 	"back/scpi"
 )
 
-// --- Instrument CRUD (admin) ---
+// --- Instruments (auto-discovered from env, no manual CRUD) ---
 
 func ListInstruments(c *gin.Context) {
 	var instruments []models.Instrument
@@ -33,36 +33,8 @@ func ListInstruments(c *gin.Context) {
 	c.JSON(http.StatusOK, instruments)
 }
 
-type InstrumentRequest struct {
-	Name   string `json:"name" binding:"required"`
-	Host   string `json:"host" binding:"required"`
-	Port   int    `json:"port" binding:"required"`
-	Active bool   `json:"active"`
-}
-
-func CreateInstrument(c *gin.Context) {
-	var req InstrumentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	inst := models.Instrument{Name: req.Name, Host: req.Host, Port: req.Port, Active: req.Active}
-	if err := database.DB.Create(&inst).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	// Auto-query *IDN? to fill model/firmware/serial
-	if info, err := scpi.QueryIDN(inst.Host, inst.Port); err == nil {
-		inst.Model = info.Model
-		inst.Firmware = info.Firmware
-		inst.Serial = info.Serial
-		inst.Online = true
-		database.DB.Save(&inst)
-	}
-	c.JSON(http.StatusCreated, inst)
-}
-
-func UpdateInstrument(c *gin.Context) {
+// ToggleInstrument switches active on/off
+func ToggleInstrument(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
@@ -73,33 +45,9 @@ func UpdateInstrument(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
-	var req InstrumentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	inst.Name = req.Name
-	inst.Host = req.Host
-	inst.Port = req.Port
-	inst.Active = req.Active
-	if err := database.DB.Save(&inst).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+	inst.Active = !inst.Active
+	database.DB.Save(&inst)
 	c.JSON(http.StatusOK, inst)
-}
-
-func DeleteInstrument(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-	if err := database.DB.Delete(&models.Instrument{}, id).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // --- Ping instrument (check SCPI connectivity) ---

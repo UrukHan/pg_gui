@@ -30,6 +30,7 @@ services:
       DATABASE_DSN: "host=postgres user=ariadna password=ariadna dbname=ariadna port=5432 sslmode=disable"
       ADMIN_LOGIN: "admin"
       ADMIN_PASSWORD: "admin"
+      INSTRUMENTS: "TH2690=192.168.1.150:45454"
     ports:
       - "8080:8080"
     volumes:

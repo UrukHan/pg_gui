@@ -76,20 +76,8 @@ export const deleteUser = (id: number) => API.delete(`/users/${id}`);
 // --- Instruments ---
 export const listInstruments = () => API.get<Instrument[]>("/instruments");
 
-export const createInstrument = (data: {
-  name: string;
-  host: string;
-  port: number;
-  active: boolean;
-}) => API.post<Instrument>("/instruments", data);
-
-export const updateInstrument = (
-  id: number,
-  data: { name: string; host: string; port: number; active: boolean }
-) => API.put<Instrument>(`/instruments/${id}`, data);
-
-export const deleteInstrument = (id: number) =>
-  API.delete(`/instruments/${id}`);
+export const toggleInstrument = (id: number) =>
+  API.put<Instrument>(`/instruments/${id}/toggle`);
 
 export const pingInstrument = (id: number) =>
   API.get<{ idn: string; model: string; firmware: string; serial: string }>(`/instruments/${id}/ping`);

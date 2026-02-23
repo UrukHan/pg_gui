@@ -1,7 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -10,10 +14,13 @@ import (
 	"back/controllers"
 	"back/database"
 	"back/middleware"
+	"back/models"
+	"back/scpi"
 )
 
 func main() {
 	database.Init()
+	syncInstruments()
 
 	r := gin.Default()
 
@@ -49,16 +56,10 @@ func main() {
 			admin.DELETE("/users/:id", controllers.DeleteUser)
 		}
 
-		// Instruments
+		// Instruments (read-only + toggle active)
 		auth.GET("/instruments", controllers.ListInstruments)
 		auth.GET("/instruments/:id/ping", controllers.PingInstrument)
-		admin2 := auth.Group("/instruments")
-		admin2.Use(middleware.AdminRequired())
-		{
-			admin2.POST("", controllers.CreateInstrument)
-			admin2.PUT("/:id", controllers.UpdateInstrument)
-			admin2.DELETE("/:id", controllers.DeleteInstrument)
-		}
+		auth.PUT("/instruments/:id/toggle", controllers.ToggleInstrument)
 
 		// Experiments
 		auth.GET("/experiments", controllers.ListExperiments)
@@ -74,5 +75,73 @@ func main() {
 
 	if err := r.Run(":8080"); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// syncInstruments reads INSTRUMENTS env var and syncs DB.
+// Format: "TH2690=192.168.1.150:45454,Probe2=10.0.0.5:45454"
+// Or simple: "192.168.1.150:45454,10.0.0.5:45454"
+func syncInstruments() {
+	raw := os.Getenv("INSTRUMENTS")
+	if raw == "" {
+		return
+	}
+
+	type entry struct {
+		Name string
+		Host string
+		Port int
+	}
+
+	var entries []entry
+	for _, s := range strings.Split(raw, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		var name, addr string
+		if idx := strings.Index(s, "="); idx > 0 {
+			name = strings.TrimSpace(s[:idx])
+			addr = strings.TrimSpace(s[idx+1:])
+		} else {
+			addr = s
+		}
+		host, portStr, ok := strings.Cut(addr, ":")
+		if !ok {
+			log.Printf("INSTRUMENTS: invalid %q (need host:port)", s)
+			continue
+		}
+		port, err := strconv.Atoi(strings.TrimSpace(portStr))
+		if err != nil {
+			log.Printf("INSTRUMENTS: bad port in %q: %v", s, err)
+			continue
+		}
+		if name == "" {
+			name = fmt.Sprintf("%s:%d", host, port)
+		}
+		entries = append(entries, entry{Name: name, Host: strings.TrimSpace(host), Port: port})
+	}
+
+	for _, e := range entries {
+		var inst models.Instrument
+		res := database.DB.Where("host = ? AND port = ?", e.Host, e.Port).First(&inst)
+		if res.Error != nil {
+			inst = models.Instrument{Name: e.Name, Host: e.Host, Port: e.Port, Active: true}
+			database.DB.Create(&inst)
+			log.Printf("Instrument added: %s (%s:%d)", e.Name, e.Host, e.Port)
+		}
+		// Query *IDN?
+		if info, err := scpi.QueryIDN(inst.Host, inst.Port); err == nil {
+			inst.Model = info.Model
+			inst.Firmware = info.Firmware
+			inst.Serial = info.Serial
+			if inst.Name == fmt.Sprintf("%s:%d", inst.Host, inst.Port) {
+				inst.Name = info.Model
+			}
+			database.DB.Save(&inst)
+			log.Printf("Instrument OK: %s (model=%s fw=%s)", inst.Name, info.Model, info.Firmware)
+		} else {
+			log.Printf("Instrument %s (%s:%d) unreachable: %v", inst.Name, inst.Host, inst.Port, err)
+		}
 	}
 }
