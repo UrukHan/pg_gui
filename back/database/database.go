@@ -41,11 +41,15 @@ func Init() {
 		if adminPass == "" {
 			adminPass = "admin"
 		}
+		adminLogin := os.Getenv("ADMIN_LOGIN")
+		if adminLogin == "" {
+			adminLogin = "admin"
+		}
 		admin := models.User{
 			FirstName:        "Admin",
 			LastName:         "Admin",
 			Position:         "Администратор",
-			Login:            "admin",
+			Login:            adminLogin,
 			Role:             models.RoleAdmin,
 			Permission:       models.PermReadWriteAll,
 			InstrumentAccess: true,
