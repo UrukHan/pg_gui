@@ -6,8 +6,17 @@ import type {
   Measurement,
 } from "./types";
 
+function getBaseURL(): string {
+  const env = process.env.NEXT_PUBLIC_API_URL;
+  if (env && !env.includes("localhost")) return env;
+  if (typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:8080`;
+  }
+  return env || "http://localhost:8080";
+}
+
 const API = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080",
+  baseURL: getBaseURL(),
 });
 
 API.interceptors.request.use((cfg) => {
@@ -83,7 +92,7 @@ export const deleteInstrument = (id: number) =>
   API.delete(`/instruments/${id}`);
 
 export const pingInstrument = (id: number) =>
-  API.get<{ idn: string }>(`/instruments/${id}/ping`);
+  API.get<{ idn: string; model: string; firmware: string; serial: string }>(`/instruments/${id}/ping`);
 
 // --- Experiments ---
 export const listExperiments = () => API.get<Experiment[]>("/experiments");

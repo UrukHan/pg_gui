@@ -23,6 +23,13 @@ func ListInstruments(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// Check online status for active instruments
+	for i := range instruments {
+		if instruments[i].Active {
+			_, err := scpi.Identify(instruments[i].Host, instruments[i].Port)
+			instruments[i].Online = err == nil
+		}
+	}
 	c.JSON(http.StatusOK, instruments)
 }
 
@@ -43,6 +50,14 @@ func CreateInstrument(c *gin.Context) {
 	if err := database.DB.Create(&inst).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// Auto-query *IDN? to fill model/firmware/serial
+	if info, err := scpi.QueryIDN(inst.Host, inst.Port); err == nil {
+		inst.Model = info.Model
+		inst.Firmware = info.Firmware
+		inst.Serial = info.Serial
+		inst.Online = true
+		database.DB.Save(&inst)
 	}
 	c.JSON(http.StatusCreated, inst)
 }
@@ -100,12 +115,17 @@ func PingInstrument(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
-	idn, err := scpi.Identify(inst.Host, inst.Port)
+	info, err := scpi.QueryIDN(inst.Host, inst.Port)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("instrument unreachable: %v", err)})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"idn": idn})
+	// Update stored model/firmware/serial
+	inst.Model = info.Model
+	inst.Firmware = info.Firmware
+	inst.Serial = info.Serial
+	database.DB.Save(&inst)
+	c.JSON(http.StatusOK, gin.H{"idn": info.Raw, "model": info.Model, "firmware": info.Firmware, "serial": info.Serial})
 }
 
 // --- Start / Stop experiment ---

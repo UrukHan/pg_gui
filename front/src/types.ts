@@ -19,6 +19,10 @@ export interface Instrument {
   host: string;
   port: number;
   active: boolean;
+  model: string;
+  firmware: string;
+  serial: string;
+  online: boolean;
 }
 
 export interface Experiment {

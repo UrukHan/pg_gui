@@ -2,8 +2,6 @@ package main
 
 import (
 	"log"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -19,18 +17,13 @@ func main() {
 
 	r := gin.Default()
 
-	// CORS
-	corsOrigins := []string{"http://localhost:3000", "http://localhost:8070"}
-	if extra := os.Getenv("CORS_ORIGINS"); extra != "" {
-		corsOrigins = append(corsOrigins, strings.Split(extra, ",")...)
-	}
+	// CORS — allow all origins so the frontend can reach the backend from any IP/domain
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     corsOrigins,
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
-		ExposeHeaders:    []string{},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
+		AllowAllOrigins: true,
+		AllowMethods:    []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:    []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
+		ExposeHeaders:   []string{},
+		MaxAge:          12 * time.Hour,
 	}))
 
 	// Health

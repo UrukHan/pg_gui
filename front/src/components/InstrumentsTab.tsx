@@ -123,7 +123,8 @@ export default function InstrumentsTab() {
   const handlePing = async (id: number) => {
     try {
       const res = await pingInstrument(id);
-      setSuccess(`Прибор отвечает: ${res.data.idn}`);
+      setSuccess(`Прибор отвечает: ${res.data.model} ${res.data.firmware}`);
+      loadInstruments();
     } catch (e: any) {
       setError(e.response?.data?.error || 'Прибор не отвечает');
     }
@@ -277,8 +278,10 @@ export default function InstrumentsTab() {
             <TableRow>
               <TableCell>ID</TableCell>
               <TableCell>Название</TableCell>
+              <TableCell>Модель</TableCell>
+              <TableCell>Прошивка</TableCell>
               <TableCell>Адрес</TableCell>
-              <TableCell>Статус</TableCell>
+              <TableCell>Связь</TableCell>
               <TableCell align="right">Действия</TableCell>
             </TableRow>
           </TableHead>
@@ -287,11 +290,21 @@ export default function InstrumentsTab() {
               <TableRow key={inst.id}>
                 <TableCell>{inst.id}</TableCell>
                 <TableCell>{inst.name}</TableCell>
+                <TableCell>{inst.model || '—'}</TableCell>
+                <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                  {inst.firmware || '—'}
+                  {inst.serial ? ` (${inst.serial})` : ''}
+                </TableCell>
                 <TableCell>{inst.host}:{inst.port}</TableCell>
                 <TableCell>
-                  <Chip label={inst.active ? 'Активен' : 'Выкл'} color={inst.active ? 'success' : 'default'} size="small" />
+                  <Chip
+                    label={inst.online ? 'Онлайн' : inst.active ? 'Офлайн' : 'Выкл'}
+                    color={inst.online ? 'success' : inst.active ? 'error' : 'default'}
+                    size="small"
+                    variant={inst.online ? 'filled' : 'outlined'}
+                  />
                 </TableCell>
-                <TableCell align="right">
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                   <IconButton size="small" onClick={() => handlePing(inst.id)} title="Проверить связь">
                     <NetworkPingIcon />
                   </IconButton>
@@ -314,7 +327,7 @@ export default function InstrumentsTab() {
             ))}
             {instruments.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} align="center">Нет приборов</TableCell>
+                <TableCell colSpan={7} align="center">Нет приборов</TableCell>
               </TableRow>
             )}
           </TableBody>

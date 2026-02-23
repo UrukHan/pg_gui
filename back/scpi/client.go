@@ -54,9 +54,41 @@ func Send(host string, port int, cmd string, timeout time.Duration) (string, err
 	return strings.TrimSpace(string(buf[:n])), nil
 }
 
+// IDNInfo holds parsed *IDN? data
+type IDNInfo struct {
+	Model    string
+	Firmware string
+	Serial   string
+	Raw      string
+}
+
 // Identify sends *IDN? and returns the identity string
 func Identify(host string, port int) (string, error) {
 	return Send(host, port, "*IDN?", defaultTimeout)
+}
+
+// QueryIDN sends *IDN? and parses the response into structured fields.
+// TH2690 returns: "model,firmware,serial" e.g. "TH2690,V1.0.22,R08C240109"
+func QueryIDN(host string, port int) (*IDNInfo, error) {
+	raw, err := Identify(host, port)
+	if err != nil {
+		return nil, err
+	}
+	if raw == "" {
+		return nil, fmt.Errorf("empty IDN response")
+	}
+	info := &IDNInfo{Raw: raw}
+	parts := strings.Split(raw, ",")
+	if len(parts) >= 1 {
+		info.Model = strings.TrimSpace(parts[0])
+	}
+	if len(parts) >= 2 {
+		info.Firmware = strings.TrimSpace(parts[1])
+	}
+	if len(parts) >= 3 {
+		info.Serial = strings.TrimSpace(parts[2])
+	}
+	return info, nil
 }
 
 // FetchAll sends FETCH:ALL_S? and parses the response
