@@ -177,7 +177,12 @@ export default function Home() {
           value={tab}
           onChange={(_, v) => setTab(v)}
           showLabels
-          sx={{ borderTop: '1px solid #e0e0e0', flexShrink: 0 }}
+          sx={{
+            bgcolor: '#1a1a2e',
+            flexShrink: 0,
+            '& .MuiBottomNavigationAction-root': { color: '#ffffff80' },
+            '& .Mui-selected': { color: '#b39ddb !important' },
+          }}
         >
           {tabs.map((t, i) => (
             <BottomNavigationAction key={i} label={t.label} icon={t.icon} />

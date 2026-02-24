@@ -127,18 +127,24 @@ export default function GraphsTab({ experimentId }: Props) {
     <Box>
       {/* Experiment selector + view toggle */}
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1.5 }} alignItems={{ md: 'center' }}>
-        <FormControl sx={{ minWidth: 250 }} size="small">
+        <FormControl sx={{ minWidth: 300 }} size="small">
           <InputLabel>Эксперимент</InputLabel>
           <Select
             value={selectedExpId ?? ''}
             label="Эксперимент"
             onChange={(e) => setSelectedExpId(e.target.value as number)}
           >
-            {experiments.map((exp) => (
-              <MenuItem key={exp.id} value={exp.id}>
-                #{exp.id} — {exp.name} ({exp.status})
-              </MenuItem>
-            ))}
+            {experiments.map((exp) => {
+              const d = exp.start_time ? new Date(exp.start_time) : null;
+              const date = d ? d.toLocaleDateString('ru-RU') : '';
+              const time = d ? d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
+              const author = exp.user ? `${exp.user.first_name} ${exp.user.last_name}` : '';
+              return (
+                <MenuItem key={exp.id} value={exp.id}>
+                  {exp.name}{author ? ` — ${author}` : ''}{date ? `, ${date} ${time}` : ''}
+                </MenuItem>
+              );
+            })}
           </Select>
         </FormControl>
 

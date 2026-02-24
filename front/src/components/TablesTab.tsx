@@ -6,10 +6,13 @@ import {
   TableHead, TableRow, Paper, IconButton, Button, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, Select, MenuItem, FormControlLabel,
   Switch, Alert, CircularProgress, Chip, InputLabel, FormControl,
+  Typography, Stack, Collapse, Divider,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { useAuth } from '@/context/AuthContext';
 import {
   listUsers, createUser, updateUser, deleteUser,
@@ -29,7 +32,7 @@ export default function TablesTab({ onOpenGraphs }: Props) {
       <Tabs
         value={subTab}
         onChange={(_, v) => setSubTab(v)}
-        sx={{ mb: 2, borderBottom: '1px solid #e0e0e0' }}
+        sx={{ mb: 1, borderBottom: '1px solid #e0e0e0' }}
       >
         <Tab label="Эксперименты" />
         <Tab label="Пользователи" />
@@ -50,6 +53,7 @@ function ExperimentsSubTab({ onOpenGraphs }: { onOpenGraphs: (id: number) => voi
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -93,69 +97,104 @@ function ExperimentsSubTab({ onOpenGraphs }: { onOpenGraphs: (id: number) => voi
     }
   };
 
-  const fmtDate = (s: string | null) => {
+  const fmtDateLine1 = (s: string | null) => {
     if (!s) return '—';
-    try { return new Date(s).toLocaleString('ru-RU'); } catch { return s; }
+    try { return new Date(s).toLocaleDateString('ru-RU'); } catch { return '—'; }
+  };
+  const fmtTimeLine2 = (s: string | null) => {
+    if (!s) return '';
+    try { return new Date(s).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); } catch { return ''; }
   };
 
   if (loading) return <Box sx={{ textAlign: 'center', p: 4 }}><CircularProgress /></Box>;
 
   return (
     <Box>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
-      <TableContainer component={Paper}>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>ID</TableCell>
-              <TableCell>Название</TableCell>
-              <TableCell>Автор</TableCell>
-              <TableCell>Статус</TableCell>
-              <TableCell>Начало</TableCell>
-              <TableCell>Конец</TableCell>
-              <TableCell>Приборы</TableCell>
-              <TableCell align="right">Действия</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {experiments.map((exp) => (
-              <TableRow key={exp.id}>
-                <TableCell>{exp.id}</TableCell>
-                <TableCell>{exp.name}</TableCell>
-                <TableCell>
-                  {exp.user ? `${exp.user.first_name} ${exp.user.last_name}` : `#${exp.user_id}`}
-                </TableCell>
-                <TableCell>
-                  <Chip label={statusLabel(exp.status)} color={statusColor(exp.status) as any} size="small" />
-                </TableCell>
-                <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtDate(exp.start_time)}</TableCell>
-                <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtDate(exp.end_time)}</TableCell>
-                <TableCell>{exp.instrument_ids}</TableCell>
-                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                  <IconButton size="small" title="Открыть графики" onClick={() => onOpenGraphs(exp.id)}>
-                    <VisibilityIcon />
-                  </IconButton>
-                  {canDelete && (
-                    <IconButton size="small" title="Удалить" onClick={() => handleDelete(exp.id)}>
-                      <DeleteIcon />
-                    </IconButton>
+      {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError('')}>{error}</Alert>}
+
+      <Stack spacing={1}>
+        {experiments.map((exp) => (
+          <Paper key={exp.id} variant="outlined" sx={{ overflow: 'hidden' }}>
+            <Box
+              sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 1, cursor: 'pointer', '&:hover': { bgcolor: '#fafafa' } }}
+              onClick={() => setExpandedId(expandedId === exp.id ? null : exp.id)}
+            >
+              {/* Date + time */}
+              <Box sx={{ minWidth: 65, flexShrink: 0, mr: 1.5 }}>
+                <Typography variant="body2" fontWeight={600} lineHeight={1.2}>
+                  {fmtDateLine1(exp.start_time)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {fmtTimeLine2(exp.start_time)}
+                </Typography>
+              </Box>
+
+              {/* Name + author */}
+              <Box sx={{ flexGrow: 1, minWidth: 0, mr: 1 }}>
+                <Typography variant="body2" fontWeight={600} noWrap>{exp.name}</Typography>
+                <Typography variant="caption" color="text.secondary" noWrap>
+                  {exp.user ? `${exp.user.first_name} ${exp.user.last_name}` : `ID ${exp.user_id}`}
+                </Typography>
+              </Box>
+
+              {/* Status */}
+              <Chip
+                label={statusLabel(exp.status)}
+                color={statusColor(exp.status) as any}
+                size="small"
+                sx={{ flexShrink: 0, mr: 0.5 }}
+              />
+
+              {/* Actions */}
+              <IconButton size="small" title="Статистика" onClick={(e) => { e.stopPropagation(); onOpenGraphs(exp.id); }}>
+                <VisibilityIcon fontSize="small" />
+              </IconButton>
+              {canDelete && (
+                <IconButton size="small" title="Удалить" onClick={(e) => { e.stopPropagation(); handleDelete(exp.id); }}>
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              )}
+              {expandedId === exp.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+            </Box>
+
+            <Collapse in={expandedId === exp.id}>
+              <Divider />
+              <Box sx={{ px: 1.5, py: 1, bgcolor: '#f9f9f9' }}>
+                <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Окончание</Typography>
+                    <Typography variant="body2">
+                      {exp.end_time ? `${fmtDateLine1(exp.end_time)} ${fmtTimeLine2(exp.end_time)}` : '—'}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Приборы</Typography>
+                    <Typography variant="body2">{exp.instrument_ids || '—'}</Typography>
+                  </Box>
+                  {exp.notes && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Заметки</Typography>
+                      <Typography variant="body2">{exp.notes}</Typography>
+                    </Box>
                   )}
-                </TableCell>
-              </TableRow>
-            ))}
-            {experiments.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={8} align="center">Нет экспериментов</TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
+                </Stack>
+              </Box>
+            </Collapse>
+          </Paper>
+        ))}
+        {experiments.length === 0 && (
+          <Paper sx={{ p: 3, textAlign: 'center' }}>
+            <Typography color="text.secondary">Нет экспериментов</Typography>
+          </Paper>
+        )}
+      </Stack>
     </Box>
   );
 }
 
 // ==================== USERS ====================
+
+const truncSx = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const;
 
 function UsersSubTab() {
   const { user: currentUser } = useAuth();
@@ -223,25 +262,18 @@ function UsersSubTab() {
     }
   };
 
-  const permLabel = (p: string) => {
-    switch (p) {
-      case 'read_own': return 'Только свои';
-      case 'read_all': return 'Чтение всех';
-      case 'read_write_all': return 'Полный доступ';
-      default: return p;
-    }
-  };
+  const roleLabel = (r: string) => r === 'admin' ? 'Админ' : 'Пользователь';
 
   if (loading) return <Box sx={{ textAlign: 'center', p: 4 }}><CircularProgress /></Box>;
 
   return (
     <Box>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
-      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>{success}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError('')}>{error}</Alert>}
+      {success && <Alert severity="success" sx={{ mb: 1 }} onClose={() => setSuccess('')}>{success}</Alert>}
 
       {isAdmin && (
-        <Box sx={{ mb: 2 }}>
-          <Button variant="outlined" onClick={() => {
+        <Box sx={{ mb: 1 }}>
+          <Button variant="outlined" size="small" onClick={() => {
             setEditingUser(null);
             setForm({ first_name: '', last_name: '', position: '', login: '', password: '', permission: 'read_own', instrument_access: false });
             setDialogOpen(true);
@@ -255,32 +287,27 @@ function UsersSubTab() {
         <Table size="small">
           <TableHead>
             <TableRow>
-              <TableCell>ID</TableCell>
               <TableCell>Имя</TableCell>
-              <TableCell>Фамилия</TableCell>
               <TableCell>Должность</TableCell>
               <TableCell>Роль</TableCell>
-              <TableCell>Доступ</TableCell>
-              <TableCell>Приборы</TableCell>
               {isAdmin && <TableCell align="right">Действия</TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
             {users.map((u) => (
               <TableRow key={u.id}>
-                <TableCell>{u.id}</TableCell>
-                <TableCell>{u.first_name}</TableCell>
-                <TableCell>{u.last_name}</TableCell>
-                <TableCell>{u.position}</TableCell>
-                <TableCell>
-                  <Chip label={u.role === 'admin' ? 'Админ' : 'Пользователь'} color={u.role === 'admin' ? 'warning' : 'default'} size="small" />
+                <TableCell sx={{ maxWidth: 140, ...truncSx }}>
+                  <Typography variant="body2" fontWeight={600} noWrap>{u.first_name}</Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>{u.last_name}</Typography>
                 </TableCell>
-                <TableCell>{permLabel(u.permission)}</TableCell>
+                <TableCell sx={{ maxWidth: 120, ...truncSx }}>
+                  <Typography variant="body2" noWrap>{u.position || '—'}</Typography>
+                </TableCell>
                 <TableCell>
-                  <Chip label={u.instrument_access ? 'Да' : 'Нет'} color={u.instrument_access ? 'success' : 'default'} size="small" />
+                  <Chip label={roleLabel(u.role)} color={u.role === 'admin' ? 'warning' : 'default'} size="small" />
                 </TableCell>
                 {isAdmin && (
-                  <TableCell align="right">
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                     <IconButton size="small" onClick={() => {
                       setEditingUser(u);
                       setForm({
@@ -289,11 +316,11 @@ function UsersSubTab() {
                       });
                       setDialogOpen(true);
                     }}>
-                      <EditIcon />
+                      <EditIcon fontSize="small" />
                     </IconButton>
                     {u.role !== 'admin' && (
                       <IconButton size="small" onClick={() => handleDelete(u.id)}>
-                        <DeleteIcon />
+                        <DeleteIcon fontSize="small" />
                       </IconButton>
                     )}
                   </TableCell>
