@@ -8,10 +8,11 @@ import {
 } from '@mui/material';
 import ScienceIcon from '@mui/icons-material/Science';
 import TableChartIcon from '@mui/icons-material/TableChart';
-import TimelineIcon from '@mui/icons-material/Timeline';
+import BarChartIcon from '@mui/icons-material/BarChart';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PersonIcon from '@mui/icons-material/Person';
 import dynamic from 'next/dynamic';
+import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
 import InstrumentsTab from '@/components/InstrumentsTab';
 import TablesTab from '@/components/TablesTab';
@@ -63,10 +64,10 @@ export default function Home() {
   if (!user) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: '#1a1a2e' }}>
-        <Paper sx={{ p: 4, maxWidth: 400, width: '100%', mx: 2 }}>
-          <Typography variant="h5" align="center" gutterBottom fontWeight={700}>
-            Ariadna Lab
-          </Typography>
+        <Paper sx={{ p: 4, maxWidth: 400, width: '100%', mx: 2, borderRadius: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+            <Image src="/images/logo.png" alt="Ariadna" width={220} height={60} style={{ objectFit: 'contain' }} />
+          </Box>
           <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 3 }}>
             Вход в систему
           </Typography>
@@ -98,6 +99,7 @@ export default function Home() {
             size="large"
             onClick={handleLogin}
             disabled={loginLoading}
+            sx={{ bgcolor: '#7c4dff', '&:hover': { bgcolor: '#651fff' } }}
           >
             {loginLoading ? <CircularProgress size={24} /> : 'Войти'}
           </Button>
@@ -110,7 +112,7 @@ export default function Home() {
   const tabs = [
     { label: 'Приборы', icon: <ScienceIcon /> },
     { label: 'Таблицы', icon: <TableChartIcon /> },
-    { label: 'Графики', icon: <TimelineIcon /> },
+    { label: 'Статистика', icon: <BarChartIcon /> },
   ];
 
   const tabContent = (
@@ -126,9 +128,9 @@ export default function Home() {
       {/* Header */}
       <AppBar position="static" sx={{ bgcolor: '#1a1a2e' }}>
         <Toolbar variant="dense">
-          <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>
-            Ariadna Lab
-          </Typography>
+          <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
+            <Image src="/images/logo.png" alt="Ariadna" width={150} height={36} style={{ objectFit: 'contain' }} />
+          </Box>
 
           {/* Desktop tabs */}
           {!isMobile && tabs.map((t, i) => (
@@ -137,8 +139,8 @@ export default function Home() {
               startIcon={t.icon}
               onClick={() => setTab(i)}
               sx={{
-                color: tab === i ? '#90caf9' : '#ffffff99',
-                borderBottom: tab === i ? '2px solid #90caf9' : 'none',
+                color: tab === i ? '#b39ddb' : '#ffffff99',
+                borderBottom: tab === i ? '2px solid #7c4dff' : 'none',
                 borderRadius: 0,
                 mx: 0.5,
                 textTransform: 'none',
@@ -175,7 +177,7 @@ export default function Home() {
           value={tab}
           onChange={(_, v) => setTab(v)}
           showLabels
-          sx={{ borderTop: '1px solid #e0e0e0' }}
+          sx={{ borderTop: '1px solid #e0e0e0', flexShrink: 0 }}
         >
           {tabs.map((t, i) => (
             <BottomNavigationAction key={i} label={t.label} icon={t.icon} />
