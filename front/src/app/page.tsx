@@ -54,7 +54,7 @@ export default function Home() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100dvh' }}>
         <CircularProgress />
       </Box>
     );
@@ -63,7 +63,7 @@ export default function Home() {
   // --- Login screen ---
   if (!user) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: '#1a1a2e' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100dvh', bgcolor: '#1a1a2e' }}>
         <Paper sx={{ p: 4, maxWidth: 400, width: '100%', mx: 2, borderRadius: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
             <Image src="/images/logo.png" alt="Ariadna" width={220} height={60} style={{ objectFit: 'contain' }} />
@@ -124,7 +124,7 @@ export default function Home() {
   );
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       {/* Header */}
       <AppBar position="static" sx={{ bgcolor: '#1a1a2e' }}>
         <Toolbar variant="dense">

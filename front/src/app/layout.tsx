@@ -10,7 +10,7 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
     return (
         <html lang="ru">
-        <body style={{ height: '100%', overflow: 'hidden', margin: 0 }}>
+        <body style={{ height: '100dvh', overflow: 'hidden', margin: 0 }}>
         <AuthProvider>
             {children}
         </AuthProvider>
