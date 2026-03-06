@@ -2,8 +2,11 @@ package controllers
 
 import (
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -18,7 +21,28 @@ func ListCameras(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	for i := range cameras {
+		cameras[i].Online = checkCameraOnline(cameras[i].RTSPURL)
+	}
 	c.JSON(http.StatusOK, cameras)
+}
+
+func checkCameraOnline(rtspURL string) bool {
+	u, err := url.Parse(rtspURL)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		port = "554"
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), 2*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func ToggleCamera(c *gin.Context) {

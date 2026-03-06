@@ -26,18 +26,17 @@ services:
     build: ./back
     container_name: pg-ariadna-back
     restart: unless-stopped
+    network_mode: host
     environment:
-      DATABASE_DSN: "host=postgres user=ariadna password=ariadna dbname=ariadna port=5432 sslmode=disable"
+      DATABASE_DSN: "host=127.0.0.1 user=ariadna password=ariadna dbname=ariadna port=5435 sslmode=disable"
       ADMIN_LOGIN: "admin"
       ADMIN_PASSWORD: "admin"
       INSTRUMENTS: "Электрометр TH2690=192.168.1.150:45454"
       CAMERAS: "DS-H104GA=rtsp://admin:Ariadna25@192.168.1.64:554/Streaming/Channels/101"
-      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ENDPOINT: "127.0.0.1:9000"
       MINIO_ACCESS_KEY: "ariadna"
       MINIO_SECRET_KEY: "ariadna123"
       MINIO_BUCKET: "experiments"
-    ports:
-      - "8080:8080"
     volumes:
       - uploads:/app/uploads
     depends_on:

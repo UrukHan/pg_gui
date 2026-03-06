@@ -12,6 +12,7 @@ import StopIcon from '@mui/icons-material/Stop';
 import SettingsIcon from '@mui/icons-material/Settings';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { useAuth } from '@/context/AuthContext';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import {
@@ -55,6 +56,7 @@ export default function InstrumentsTab() {
     auto_range: true, range: '', speed: 'MED', zero_correct: true,
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
 
   // Measurement params selector
   const [paramsDialogOpen, setParamsDialogOpen] = useState(false);
@@ -217,17 +219,25 @@ export default function InstrumentsTab() {
 
       {/* Start experiment form */}
       {!runningExp && hasInstrumentAccess && (
-        <Paper sx={{ p: 2, mb: 2 }}>
+        <Paper sx={{ p: { xs: 1.5, sm: 2 }, mb: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
             <Typography variant="subtitle1" fontWeight={600}>Запуск эксперимента</Typography>
-            <IconButton size="small" onClick={() => setParamsDialogOpen(true)} title="Параметры измерения">
-              <SettingsIcon />
-            </IconButton>
+            <Stack direction="row" spacing={0.5}>
+              <IconButton size="small" onClick={() => setInfoOpen(true)} title="Справка по настройкам">
+                <InfoOutlinedIcon fontSize="small" />
+              </IconButton>
+              <IconButton size="small" onClick={() => setParamsDialogOpen(true)} title="Параметры измерения">
+                <SettingsIcon fontSize="small" />
+              </IconButton>
+            </Stack>
           </Stack>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1.5 }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1.5 }}>
             <TextField label="Название" value={expName} onChange={(e) => setExpName(e.target.value)} fullWidth size="small" />
             <TextField label="Заметки" value={expNotes} onChange={(e) => setExpNotes(e.target.value)} fullWidth size="small" />
           </Stack>
+
+          {/* Instrument selection */}
+          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Приборы для записи:</Typography>
           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1.5 }}>
             {instruments.filter((i) => i.active && i.online).map((inst) => (
               <Chip
@@ -243,73 +253,82 @@ export default function InstrumentsTab() {
               <Typography variant="body2" color="text.secondary">Нет доступных приборов</Typography>
             )}
           </Box>
+
           {/* Instrument settings accordion */}
           <Box sx={{ mb: 1.5 }}>
             <Button size="small" variant="text" onClick={() => setSettingsOpen(!settingsOpen)}
-              startIcon={<SettingsIcon />} sx={{ textTransform: 'none' }}>
-              Настройки прибора {settingsOpen ? '▲' : '▼'}
+              startIcon={settingsOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              sx={{ textTransform: 'none', color: 'text.secondary' }}>
+              Настройки электрометра
             </Button>
             <Collapse in={settingsOpen}>
-              <Paper variant="outlined" sx={{ p: 1.5, mt: 0.5 }}>
+              <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 }, mt: 0.5 }}>
                 <Stack spacing={1.5}>
-                  {/* Function */}
+                  {/* Function — single measurement mode */}
                   <Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Функция измерения</Typography>
-                    <ToggleButtonGroup value={settings.function} exclusive size="small"
-                      onChange={(_, v) => v && setSettings({ ...settings, function: v })}>
-                      <ToggleButton value="CURR">Ток (Ammeter)</ToggleButton>
-                      <ToggleButton value="RES">Сопротивление</ToggleButton>
-                      <ToggleButton value="CHAR">Заряд</ToggleButton>
+                    <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                      Режим измерения <Typography component="span" variant="caption" color="warning.main">(одновременно только один)</Typography>
+                    </Typography>
+                    <ToggleButtonGroup value={settings.function} exclusive size="small" fullWidth
+                      onChange={(_, v) => v && setSettings({ ...settings, function: v })}
+                      sx={{ '& .MuiToggleButton-root': { flex: 1, fontSize: { xs: '0.7rem', sm: '0.8rem' }, px: { xs: 0.5, sm: 1.5 } } }}>
+                      <ToggleButton value="CURR">Ток (A)</ToggleButton>
+                      <ToggleButton value="RES">Сопр. (R)</ToggleButton>
+                      <ToggleButton value="CHAR">Заряд (Q)</ToggleButton>
                     </ToggleButtonGroup>
                   </Box>
 
-                  {/* Source */}
+                  {/* Source HV */}
                   <Box>
-                    <Stack direction="row" alignItems="center" spacing={1}>
+                    <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
                       <FormControlLabel
                         control={<Switch checked={settings.source_on} size="small"
                           onChange={(e) => setSettings({ ...settings, source_on: e.target.checked })} />}
                         label={<Typography variant="body2">Источник HV</Typography>}
+                        sx={{ mr: 0 }}
                       />
                       {settings.source_on && (
-                        <TextField label="Напряжение, В" type="number" size="small"
+                        <TextField label="В" type="number" size="small"
                           value={settings.source_volt}
                           onChange={(e) => setSettings({ ...settings, source_volt: Number(e.target.value) })}
                           inputProps={{ min: -1000, max: 1000, step: 1 }}
-                          sx={{ width: 140 }}
+                          sx={{ width: { xs: 90, sm: 120 } }}
                         />
                       )}
                     </Stack>
                     {settings.source_on && (
                       <Slider value={settings.source_volt} min={-1000} max={1000} step={1}
                         onChange={(_, v) => setSettings({ ...settings, source_volt: v as number })}
-                        valueLabelDisplay="auto" size="small" sx={{ mt: 0.5, mx: 1 }}
+                        valueLabelDisplay="auto" size="small"
+                        marks={[{ value: -1000, label: '-1kV' }, { value: 0, label: '0' }, { value: 1000, label: '1kV' }]}
+                        sx={{ mt: 0.5, mx: 1 }}
                       />
                     )}
                   </Box>
 
                   {/* Speed */}
                   <Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Скорость измерения</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Скорость</Typography>
                     <ToggleButtonGroup value={settings.speed} exclusive size="small"
-                      onChange={(_, v) => v && setSettings({ ...settings, speed: v })}>
+                      onChange={(_, v) => v && setSettings({ ...settings, speed: v })}
+                      sx={{ '& .MuiToggleButton-root': { fontSize: { xs: '0.7rem', sm: '0.8rem' }, px: { xs: 1, sm: 1.5 } } }}>
                       <ToggleButton value="FAST">Быстро</ToggleButton>
                       <ToggleButton value="MED">Средне</ToggleButton>
                       <ToggleButton value="SLOW">Точно</ToggleButton>
                     </ToggleButtonGroup>
                   </Box>
 
-                  {/* Range & Zero */}
-                  <Stack direction="row" spacing={2}>
+                  {/* Range & Zero — compact row */}
+                  <Stack direction="row" spacing={{ xs: 1, sm: 2 }} flexWrap="wrap">
                     <FormControlLabel
                       control={<Switch checked={settings.auto_range} size="small"
                         onChange={(e) => setSettings({ ...settings, auto_range: e.target.checked })} />}
-                      label={<Typography variant="body2">Авто-диапазон</Typography>}
+                      label={<Typography variant="body2" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>Авто-диапазон</Typography>}
                     />
                     <FormControlLabel
                       control={<Checkbox checked={settings.zero_correct} size="small"
                         onChange={(e) => setSettings({ ...settings, zero_correct: e.target.checked })} />}
-                      label={<Typography variant="body2">Коррекция нуля</Typography>}
+                      label={<Typography variant="body2" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>Коррекция нуля</Typography>}
                     />
                   </Stack>
                 </Stack>
@@ -317,15 +336,23 @@ export default function InstrumentsTab() {
             </Collapse>
           </Box>
 
-          <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-            Параметры: {selectedParams.length === ALL_PARAMS.length ? 'Все' : selectedParams.length + ' из ' + ALL_PARAMS.length}
-          </Typography>
-          <Button
-            variant="contained" color="success" startIcon={<PlayArrowIcon />}
-            onClick={handleStart} disabled={!expName.trim() || selectedInstruments.length === 0}
-          >
-            Запустить
-          </Button>
+          {/* Bottom: params summary + start button */}
+          <Stack direction="row" alignItems="center" justifyContent="space-between">
+            <Typography variant="caption" color="text.secondary">
+              {selectedParams.length === ALL_PARAMS.length ? 'Все параметры' : `${selectedParams.length}/${ALL_PARAMS.length} парам.`}
+              {settings.function === 'CURR' && ' | Ток'}
+              {settings.function === 'RES' && ' | Сопр.'}
+              {settings.function === 'CHAR' && ' | Заряд'}
+              {settings.source_on && ` | HV ${settings.source_volt}В`}
+            </Typography>
+            <Button
+              variant="contained" color="success" startIcon={<PlayArrowIcon />}
+              onClick={handleStart} disabled={!expName.trim() || selectedInstruments.length === 0}
+              sx={{ minWidth: { xs: 'auto', sm: 140 } }}
+            >
+              Запустить
+            </Button>
+          </Stack>
         </Paper>
       )}
 
@@ -412,6 +439,13 @@ export default function InstrumentsTab() {
                     </Typography>
                   </Box>
                   <Chip
+                    label={cam.online ? 'Online' : 'Offline'}
+                    color={cam.online ? 'info' : 'error'}
+                    size="small"
+                    variant={cam.online ? 'filled' : 'outlined'}
+                    sx={{ mr: 1 }}
+                  />
+                  <Chip
                     label={cam.active ? 'Запись вкл' : 'Запись выкл'}
                     color={cam.active ? 'success' : 'default'}
                     size="small"
@@ -456,6 +490,68 @@ export default function InstrumentsTab() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setParamsDialogOpen(false)} variant="contained" size="small">Готово</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Info dialog */}
+      <Dialog open={infoOpen} onClose={() => setInfoOpen(false)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { maxHeight: '85vh' } }}>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <InfoOutlinedIcon color="info" /> Справка: настройки эксперимента
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="subtitle2" color="primary" gutterBottom>Режим измерения</Typography>
+          <Typography variant="body2" paragraph>
+            Электрометр TH2690 измеряет <b>только один параметр</b> за раз:
+          </Typography>
+          <Box component="ul" sx={{ mt: 0, pl: 2.5, '& li': { mb: 0.5 } }}>
+            <li><Typography variant="body2"><b>Ток (A)</b> — амперметр, измерение постоянного тока. Диапазон от фА до мА.</Typography></li>
+            <li><Typography variant="body2"><b>Сопр. (R)</b> — омметр, измерение сопротивления. Для высокоомных материалов.</Typography></li>
+            <li><Typography variant="body2"><b>Заряд (Q)</b> — кулонметр, измерение накопленного заряда.</Typography></li>
+          </Box>
+          <Typography variant="body2" color="text.secondary" paragraph>
+            Остальные поля (напряжение, температура, влажность) записываются всегда.
+          </Typography>
+
+          <Divider sx={{ my: 1.5 }} />
+          <Typography variant="subtitle2" color="primary" gutterBottom>Источник HV</Typography>
+          <Typography variant="body2" paragraph>
+            Встроенный источник высокого напряжения (от -1000 до +1000 В).
+            Подаёт постоянное напряжение на образец для измерения тока утечки или сопротивления изоляции.
+            <b> Будьте осторожны</b> — высокое напряжение подаётся сразу при старте эксперимента.
+          </Typography>
+
+          <Divider sx={{ my: 1.5 }} />
+          <Typography variant="subtitle2" color="primary" gutterBottom>Скорость измерения</Typography>
+          <Box component="ul" sx={{ mt: 0, pl: 2.5, '& li': { mb: 0.5 } }}>
+            <li><Typography variant="body2"><b>Быстро (FAST)</b> — максимальная скорость, меньшая точность. Для быстрых процессов.</Typography></li>
+            <li><Typography variant="body2"><b>Средне (MED)</b> — баланс скорости и точности. Рекомендуется по умолчанию.</Typography></li>
+            <li><Typography variant="body2"><b>Точно (SLOW)</b> — максимальная точность, медленный опрос. Для стабильных измерений.</Typography></li>
+          </Box>
+
+          <Divider sx={{ my: 1.5 }} />
+          <Typography variant="subtitle2" color="primary" gutterBottom>Авто-диапазон</Typography>
+          <Typography variant="body2" paragraph>
+            Прибор автоматически выбирает оптимальный диапазон измерения.
+            Отключите, если знаете ожидаемый порядок величины — это ускорит измерение.
+          </Typography>
+
+          <Divider sx={{ my: 1.5 }} />
+          <Typography variant="subtitle2" color="primary" gutterBottom>Коррекция нуля</Typography>
+          <Typography variant="body2" paragraph>
+            Компенсация смещения нуля прибора. Рекомендуется оставить включённой
+            для точных измерений малых токов и зарядов.
+          </Typography>
+
+          <Divider sx={{ my: 1.5 }} />
+          <Typography variant="subtitle2" color="primary" gutterBottom>Камера</Typography>
+          <Typography variant="body2" paragraph>
+            При запуске эксперимента автоматически начинается запись видео с активных камер.
+            Видео сохраняется в хранилище и доступно на вкладке статистики.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setInfoOpen(false)} variant="contained" size="small">Понятно</Button>
         </DialogActions>
       </Dialog>
     </Box>
