@@ -41,13 +41,52 @@ func DefaultSettings() InstrumentSettings {
 	}
 }
 
-// ApplySettings logs the desired settings but does NOT send them to the TH2690.
-// The TH2690 rejects ALL remote configuration commands (Error 5--Not found).
-// Settings must be configured via the instrument's front panel.
-// Only FUNC:RUN and FETCH:ALL_S? work remotely.
+// ApplySettings configures the TH2690 electrometer.
+// First switches to REMOTE mode, then sends configuration commands.
+// Each command is sent on its own TCP connection (TH2690 requirement).
+// Best-effort: logs warnings but does not block experiment start.
 func ApplySettings(host string, port int, s InstrumentSettings) error {
-	log.Printf("[SCPI] ApplySettings %s:%d desired settings: func=%s freq=%.0f autoRange=%v zeroCorr=%v sourceOn=%v sourceVolt=%.0f (NOTE: TH2690 does not support remote config, using front-panel settings)",
+	log.Printf("[SCPI] ApplySettings %s:%d settings: func=%s freq=%.0f autoRange=%v zeroCorr=%v sourceOn=%v sourceVolt=%.0f",
 		host, port, s.Function, s.Frequency, s.AutoRange, s.ZeroCorrect, s.SourceOn, s.SourceVolt)
+
+	// Step 1: Try to switch instrument to REMOTE mode
+	remCmds := []string{"SYST:REM", "SYST:RWL", "SYSTem:REMote", "SYST:LOC OFF"}
+	for _, cmd := range remCmds {
+		resp, err := Send(host, port, cmd, 2*time.Second)
+		log.Printf("[SCPI] RemoteMode %s:%d cmd=%q resp=%q err=%v", host, port, cmd, resp, err)
+	}
+
+	// Step 2: Clear errors and reset
+	for _, cmd := range []string{"*CLS", "*RST"} {
+		resp, err := Send(host, port, cmd, 2*time.Second)
+		log.Printf("[SCPI] Init %s:%d cmd=%q resp=%q err=%v", host, port, cmd, resp, err)
+	}
+
+	// Step 3: Disable zero check (critical — shorts input when ON)
+	for _, cmd := range []string{"SYST:ZCH OFF", "SYST:ZCH 0", "ZCHK:STAT OFF"} {
+		resp, err := Send(host, port, cmd, 2*time.Second)
+		log.Printf("[SCPI] ZeroCheck %s:%d cmd=%q resp=%q err=%v", host, port, cmd, resp, err)
+	}
+
+	// Step 4: Apply settings (best-effort, each on own connection)
+	cmds := buildSettingsCommands(s)
+	for _, cmd := range cmds {
+		resp, err := Send(host, port, cmd, 2*time.Second)
+		if err != nil {
+			log.Printf("[SCPI] ApplySettings %s:%d cmd=%q ERROR: %v", host, port, cmd, err)
+		} else if resp != "" {
+			log.Printf("[SCPI] ApplySettings %s:%d cmd=%q resp=%q", host, port, cmd, resp)
+		} else {
+			log.Printf("[SCPI] ApplySettings %s:%d cmd=%q OK (empty)", host, port, cmd)
+		}
+	}
+
+	// Step 5: Query current state for diagnostics
+	for _, cmd := range []string{"FUNC?", "SOUR:VOLT?", "SOUR:STAT?", "SYST:ZCH?", "RANG:AUTO?"} {
+		resp, err := Send(host, port, cmd, 2*time.Second)
+		log.Printf("[SCPI] QueryState %s:%d cmd=%q resp=%q err=%v", host, port, cmd, resp, err)
+	}
+
 	return nil
 }
 
