@@ -1,6 +1,7 @@
 package recorder
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -113,12 +114,17 @@ func (m *Manager) Start(experimentID uint) {
 	filePath := filepath.Join(tmpDir, fileName)
 	objName := fmt.Sprintf("video/%s", fileName)
 
+	log.Printf("[Recorder] Preparing FFmpeg for exp=%d camera=%s url=%s file=%s", experimentID, cam.Name, cam.RTSPURL, filePath)
+
 	// FFmpeg: record RTSP to MP4 file
 	// -rtsp_transport tcp: more reliable
 	// -t 86400: max 24h safety limit
 	// -c copy: no re-encoding, just mux
+	var stderrBuf bytes.Buffer
 	cmd := exec.Command("ffmpeg",
+		"-loglevel", "warning",
 		"-rtsp_transport", "tcp",
+		"-timeout", "5000000", // 5s connection timeout (microseconds)
 		"-i", cam.RTSPURL,
 		"-c", "copy",
 		"-t", "86400",
@@ -127,7 +133,7 @@ func (m *Manager) Start(experimentID uint) {
 		filePath,
 	)
 	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		log.Printf("[Recorder] FFmpeg start error for exp=%d: %v", experimentID, err)
@@ -146,7 +152,12 @@ func (m *Manager) Start(experimentID uint) {
 	go func() {
 		defer close(rec.done)
 		if err := cmd.Wait(); err != nil {
-			log.Printf("[Recorder] FFmpeg finished for exp=%d: %v", experimentID, err)
+			log.Printf("[Recorder] FFmpeg finished for exp=%d: %v stderr: %s", experimentID, err, stderrBuf.String())
+		} else {
+			log.Printf("[Recorder] FFmpeg finished OK for exp=%d", experimentID)
+		}
+		if stderrBuf.Len() > 0 {
+			log.Printf("[Recorder] FFmpeg stderr for exp=%d: %s", experimentID, stderrBuf.String())
 		}
 	}()
 

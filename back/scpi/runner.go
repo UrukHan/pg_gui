@@ -63,9 +63,16 @@ func (r *Runner) poll(experimentID uint, instruments []models.Instrument, interv
 			return
 		case <-ticker.C:
 			for _, inst := range instruments {
-				resp, err := FetchAll(inst.Host, inst.Port)
+				// Log raw SCPI response for debugging
+				rawResp, rawErr := Send(inst.Host, inst.Port, "FETCH:ALL_S?", defaultTimeout)
+				if rawErr != nil {
+					log.Printf("[SCPI] experiment=%d inst=%d raw fetch error: %v", experimentID, inst.ID, rawErr)
+				} else {
+					log.Printf("[SCPI] experiment=%d inst=%d raw: %s", experimentID, inst.ID, rawResp)
+				}
+				resp, err := ParseAllS(rawResp)
 				if err != nil {
-					log.Printf("[SCPI] experiment=%d instrument=%d fetch error: %v", experimentID, inst.ID, err)
+					log.Printf("[SCPI] experiment=%d instrument=%d parse error: %v", experimentID, inst.ID, err)
 					continue
 				}
 

@@ -263,23 +263,21 @@ export default function InstrumentsTab() {
             const upd = (patch: Partial<InstrumentSettings>) => updateSettings(cid, patch);
             return (
               <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 }, mb: 1.5 }}>
-                {/* Instrument selector tabs */}
-                {onlineInsts.length > 1 && (
-                  <ToggleButtonGroup value={cid} exclusive size="small" sx={{ mb: 1.5, flexWrap: 'wrap' }}
-                    onChange={(_, v) => { if (v !== null) setConfigInstId(v); }}>
-                    {onlineInsts.map((inst) => {
-                      const is = getSettings(inst.id);
-                      return (
-                        <ToggleButton key={inst.id} value={inst.id}
-                          sx={{ px: 1.5, py: 0.5, fontSize: '0.75rem', textTransform: 'none' }}>
-                          {inst.model || inst.name}
-                          <Chip label={is.function} size="small" sx={{ ml: 0.5, height: 18, fontSize: '0.65rem' }}
-                            color={is.function === 'CURR' ? 'error' : is.function === 'RES' ? 'warning' : 'info'} />
-                        </ToggleButton>
-                      );
-                    })}
-                  </ToggleButtonGroup>
-                )}
+                {/* Instrument selector tabs — always visible */}
+                <ToggleButtonGroup value={cid} exclusive size="small" sx={{ mb: 1.5, flexWrap: 'wrap' }}
+                  onChange={(_, v) => { if (v !== null) setConfigInstId(v); }}>
+                  {onlineInsts.map((inst) => {
+                    const is = getSettings(inst.id);
+                    return (
+                      <ToggleButton key={inst.id} value={inst.id}
+                        sx={{ px: 1.5, py: 0.5, fontSize: '0.75rem', textTransform: 'none' }}>
+                        {inst.model || inst.name}
+                        <Chip label={is.function} size="small" sx={{ ml: 0.5, height: 18, fontSize: '0.65rem' }}
+                          color={is.function === 'CURR' ? 'error' : is.function === 'RES' ? 'warning' : 'info'} />
+                      </ToggleButton>
+                    );
+                  })}
+                </ToggleButtonGroup>
 
                 <Stack spacing={1.5}>
                   {/* Measurement mode */}
