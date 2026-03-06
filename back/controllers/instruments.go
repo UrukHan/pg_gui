@@ -76,6 +76,69 @@ func PingInstrument(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"idn": info.Raw, "model": info.Model, "firmware": info.Firmware, "serial": info.Serial})
 }
 
+// --- Probe SCPI commands (diagnostic) ---
+
+func ProbeInstrument(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var inst models.Instrument
+	if err := database.DB.First(&inst, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+
+	// Test various command syntaxes to find what TH2690 accepts
+	testCmds := []string{
+		"FUNC?",
+		"FUNC CURR",
+		":FUNC CURR",
+		":FUNC:CURR",
+		"SENS:FUNC CURR",
+		":SENS:FUNC 'CURR'",
+		"CONF:CURR",
+		"SPEED?",
+		"SPEED MED",
+		":SPEED MED",
+		"RATE?",
+		"RATE MED",
+		"RANG:AUTO?",
+		"RANG:AUTO ON",
+		":RANG:AUTO ON",
+		"CURR:RANG:AUTO ON",
+		":CURR:RANG:AUTO ON",
+		"SOUR:VOLT?",
+		"SOUR:VOLT 100",
+		":SOUR:VOLT 100",
+		"SOUR:VOLT:LEV 100",
+		"SOUR:STAT?",
+		"SOUR:STAT ON",
+		":SOUR:STAT ON",
+		"OUTP ON",
+		":OUTP ON",
+		"ZERO:CORR?",
+		"ZERO:CORR",
+		":ZERO:CORR",
+		"SYST:ZCOR:STAT ON",
+		"SYST:ZCH?",
+	}
+
+	results := make([]gin.H, 0, len(testCmds))
+	for _, cmd := range testCmds {
+		resp, err := scpi.Send(inst.Host, inst.Port, cmd, 2*time.Second)
+		entry := gin.H{"cmd": cmd, "resp": resp}
+		if err != nil {
+			entry["err"] = err.Error()
+		}
+		results = append(results, entry)
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"results": results})
+}
+
 // --- Start / Stop experiment ---
 
 type StartExperimentRequest struct {
@@ -201,6 +264,13 @@ func StopExperiment(c *gin.Context) {
 	// Check permissions
 	if user.Role != models.RoleAdmin && exp.UserID != user.ID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	// Atomically mark as stopping to prevent double-stop race
+	res := database.DB.Model(&exp).Where("status = ?", models.StatusRunning).Update("status", "stopping")
+	if res.RowsAffected == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "experiment already stopping"})
 		return
 	}
 

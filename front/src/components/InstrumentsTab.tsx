@@ -48,6 +48,8 @@ export default function InstrumentsTab() {
 
   // Which instrument settings are being edited
   const [configInstId, setConfigInstId] = useState<number | null>(null);
+  // Double-click protection
+  const [buttonLock, setButtonLock] = useState(false);
 
   // Helper: get settings for an instrument (with defaults)
   const getSettings = (id: number): InstrumentSettings => settingsMap[String(id)] || defaultSettings();
@@ -157,8 +159,11 @@ export default function InstrumentsTab() {
   };
 
   const handleStart = async () => {
+    if (buttonLock) return;
     if (!expName.trim()) { setError('Введите название эксперимента'); return; }
     if (selectedInstruments.length === 0) { setError('Выберите хотя бы один прибор'); return; }
+    setButtonLock(true);
+    setTimeout(() => setButtonLock(false), 3000);
     setError('');
     try {
       // Build per-instrument settings map for backend
@@ -182,7 +187,9 @@ export default function InstrumentsTab() {
   };
 
   const handleStop = async () => {
-    if (!runningExp) return;
+    if (!runningExp || buttonLock) return;
+    setButtonLock(true);
+    setTimeout(() => setButtonLock(false), 3000);
     try {
       await stopExperiment(runningExp.id);
       setRunningExp(null);
@@ -216,7 +223,7 @@ export default function InstrumentsTab() {
                   {polling && <Chip label="Сбор данных" color="success" size="small" sx={{ ml: 1 }} />}
                 </Typography>
               </Box>
-              <Button variant="contained" color="error" startIcon={<StopIcon />} onClick={handleStop}>
+              <Button variant="contained" color="error" startIcon={<StopIcon />} onClick={handleStop} disabled={buttonLock}>
                 Стоп
               </Button>
             </Stack>
@@ -362,7 +369,7 @@ export default function InstrumentsTab() {
             </Typography>
             <Button
               variant="contained" color="success" startIcon={<PlayArrowIcon />}
-              onClick={handleStart} disabled={!expName.trim() || selectedInstruments.length === 0}
+              onClick={handleStart} disabled={buttonLock || !expName.trim() || selectedInstruments.length === 0}
               sx={{ minWidth: { xs: 'auto', sm: 140 } }}
             >
               Запустить

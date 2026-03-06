@@ -63,6 +63,7 @@ func main() {
 		// Instruments (read-only + toggle active)
 		auth.GET("/instruments", controllers.ListInstruments)
 		auth.GET("/instruments/:id/ping", controllers.PingInstrument)
+		auth.GET("/instruments/:id/probe", controllers.ProbeInstrument)
 		auth.GET("/instruments/:id/settings", controllers.GetInstrumentSettings)
 		auth.POST("/instruments/:id/command", controllers.SendCommand)
 		auth.PUT("/instruments/:id/toggle", controllers.ToggleInstrument)
