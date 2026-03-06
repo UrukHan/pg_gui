@@ -12,11 +12,13 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { useAuth } from '@/context/AuthContext';
+import VideocamIcon from '@mui/icons-material/Videocam';
 import {
   listInstruments, toggleInstrument, pingInstrument,
   startExperiment, stopExperiment, listExperiments, getExperimentStatus,
+  listCameras,
 } from '@/api';
-import type { Instrument, Experiment } from '@/types';
+import type { Instrument, Camera, Experiment } from '@/types';
 
 const ALL_PARAMS = [
   { key: 'voltage', label: 'Напряжение (В)' },
@@ -35,6 +37,7 @@ export default function InstrumentsTab() {
   const hasInstrumentAccess = user?.instrument_access || isAdmin;
 
   const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const [cameras, setCameras] = useState<Camera[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -56,8 +59,9 @@ export default function InstrumentsTab() {
 
   const loadInstruments = useCallback(async () => {
     try {
-      const res = await listInstruments();
-      setInstruments(res.data);
+      const [instRes, camRes] = await Promise.all([listInstruments(), listCameras()]);
+      setInstruments(instRes.data);
+      setCameras(camRes.data);
     } catch {
       setError('Ошибка загрузки приборов');
     } finally {
@@ -299,6 +303,34 @@ export default function InstrumentsTab() {
           </Paper>
         )}
       </Stack>
+
+      {/* Cameras list */}
+      {cameras.length > 0 && (
+        <>
+          <Typography variant="subtitle1" fontWeight={600} sx={{ mt: 2, mb: 1 }}>Камеры</Typography>
+          <Stack spacing={1}>
+            {cameras.map((cam) => (
+              <Paper key={cam.id} variant="outlined">
+                <Box sx={{ display: 'flex', alignItems: 'center', px: 2, py: 1 }}>
+                  <VideocamIcon sx={{ mr: 1.5, color: cam.active ? 'success.main' : 'text.disabled' }} />
+                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                    <Typography variant="body1" fontWeight={600} noWrap>{cam.name}</Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap>
+                      {cam.rtsp_url.replace(/\/\/.*@/, '//***@')}
+                    </Typography>
+                  </Box>
+                  <Chip
+                    label={cam.active ? 'Активна' : 'Выкл'}
+                    color={cam.active ? 'success' : 'default'}
+                    size="small"
+                    variant={cam.active ? 'filled' : 'outlined'}
+                  />
+                </Box>
+              </Paper>
+            ))}
+          </Stack>
+        </>
+      )}
 
       {/* Params selector dialog */}
       <Dialog open={paramsDialogOpen} onClose={() => setParamsDialogOpen(false)} maxWidth="xs" fullWidth>
