@@ -1,11 +1,14 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import {
   Box, Typography, Paper, CircularProgress, Alert, FormControl,
   InputLabel, Select, MenuItem, Stack, Chip, ToggleButton, ToggleButtonGroup,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Slider, IconButton, Pagination,
 } from '@mui/material';
+import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, PointElement, LineElement,
@@ -38,6 +41,29 @@ const PARAMS = [
 
 type ParamKey = typeof PARAMS[number]['key'];
 
+const STEP_OPTIONS = [
+  { value: 1, label: 'Все' },
+  { value: 5, label: 'x5' },
+  { value: 10, label: 'x10' },
+  { value: 25, label: 'x25' },
+  { value: 50, label: 'x50' },
+  { value: 100, label: 'x100' },
+];
+
+const PER_PAGE_OPTIONS = [100, 250, 500, 1000, 2000];
+
+function fmtMs(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s} сек`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}:${String(s % 60).padStart(2, '0')}`;
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 export default function GraphsTab({ experimentId }: Props) {
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [selectedExpId, setSelectedExpId] = useState<number | null>(experimentId);
@@ -49,6 +75,23 @@ export default function GraphsTab({ experimentId }: Props) {
   const [chartMode, setChartMode] = useState<'combined' | 'separate'>('combined');
   const [viewMode, setViewMode] = useState<'chart' | 'table' | 'video'>('chart');
 
+  // Time range (ms offsets from timeMin)
+  const [timeMin, setTimeMin] = useState<string | null>(null);
+  const [timeMax, setTimeMax] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState<[number, number]>([0, 100]);
+  const durationMs = useMemo(() => {
+    if (!timeMin || !timeMax) return 0;
+    return new Date(timeMax).getTime() - new Date(timeMin).getTime();
+  }, [timeMin, timeMax]);
+
+  // Step & pagination
+  const [step, setStep] = useState(1);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(500);
+  const [total, setTotal] = useState(0);
+  const [filteredTotal, setFilteredTotal] = useState(0);
+  const fetchRef = useRef(0);
+
   useEffect(() => {
     listExperiments().then((res) => setExperiments(res.data)).catch(() => {});
   }, []);
@@ -57,18 +100,62 @@ export default function GraphsTab({ experimentId }: Props) {
     if (experimentId !== null) setSelectedExpId(experimentId);
   }, [experimentId]);
 
+  // Reset state on experiment change — first fetch to get time bounds
   useEffect(() => {
     if (selectedExpId === null) return;
     setLoading(true);
     setError('');
-    getExperimentData(selectedExpId)
+    setPage(1);
+    setStep(1);
+    setTimeRange([0, 100]);
+    getExperimentData(selectedExpId, { per_page: 2000 })
       .then((res) => {
         setExperiment(res.data.experiment);
         setMeasurements(res.data.measurements || []);
+        setTotal(res.data.total);
+        setFilteredTotal(res.data.filtered_total);
+        setTimeMin(res.data.time_min);
+        setTimeMax(res.data.time_max);
       })
       .catch((e) => setError(e.response?.data?.error || 'Ошибка загрузки данных'))
       .finally(() => setLoading(false));
   }, [selectedExpId]);
+
+  // Fetch with filters (debounced via ref)
+  const fetchData = useCallback(async () => {
+    if (!selectedExpId || !timeMin || !timeMax) return;
+    const id = ++fetchRef.current;
+    setLoading(true);
+
+    const minT = new Date(timeMin).getTime();
+    const dur = durationMs || 1;
+    const from = new Date(minT + (timeRange[0] / 100) * dur).toISOString();
+    const to = new Date(minT + (timeRange[1] / 100) * dur).toISOString();
+
+    try {
+      const res = await getExperimentData(selectedExpId, {
+        from, to, step, page, per_page: perPage,
+      });
+      if (id !== fetchRef.current) return; // stale
+      setMeasurements(res.data.measurements || []);
+      setFilteredTotal(res.data.filtered_total);
+    } catch (e: any) {
+      if (id === fetchRef.current) setError(e.response?.data?.error || 'Ошибка');
+    } finally {
+      if (id === fetchRef.current) setLoading(false);
+    }
+  }, [selectedExpId, timeMin, timeMax, durationMs, timeRange, step, page, perPage]);
+
+  // Debounced fetch on filter change (not on initial load)
+  const isInitial = useRef(true);
+  useEffect(() => {
+    if (isInitial.current) { isInitial.current = false; return; }
+    const timer = setTimeout(fetchData, 300);
+    return () => clearTimeout(timer);
+  }, [fetchData]);
+
+  // Reset page on filter change
+  useEffect(() => { setPage(1); }, [timeRange, step, perPage]);
 
   const toggleParam = (key: ParamKey) => {
     setActiveParams((prev) =>
@@ -77,7 +164,11 @@ export default function GraphsTab({ experimentId }: Props) {
   };
 
   const labels = useMemo(
-    () => measurements.map((m) => new Date(m.recorded_at).toLocaleTimeString('ru-RU')),
+    () => measurements.map((m) => {
+      const d = new Date(m.recorded_at);
+      return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        + '.' + String(d.getMilliseconds()).padStart(3, '0');
+    }),
     [measurements]
   );
 
@@ -122,11 +213,20 @@ export default function GraphsTab({ experimentId }: Props) {
   });
 
   const visibleParams = PARAMS.filter((p) => activeParams.includes(p.key));
+  const totalPages = Math.max(1, Math.ceil(filteredTotal / perPage));
+
+  // Time range labels for slider
+  const rangeFromLabel = timeMin
+    ? fmtTime(new Date(new Date(timeMin).getTime() + (timeRange[0] / 100) * durationMs).toISOString())
+    : '';
+  const rangeToLabel = timeMin
+    ? fmtTime(new Date(new Date(timeMin).getTime() + (timeRange[1] / 100) * durationMs).toISOString())
+    : '';
 
   return (
     <Box>
-      {/* Experiment selector + view toggle */}
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1.5 }} alignItems={{ md: 'center' }}>
+      {/* Row 1: experiment selector + view toggle */}
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1 }} alignItems={{ md: 'center' }}>
         <FormControl sx={{ minWidth: 300 }} size="small">
           <InputLabel>Эксперимент</InputLabel>
           <Select
@@ -155,14 +255,9 @@ export default function GraphsTab({ experimentId }: Props) {
         </ToggleButtonGroup>
 
         {experiment && (
-          <Typography variant="body2" color="text.secondary">
-            {experiment.name} | {measurements.length} изм.
-            {experiment.start_time && (
-              <> | {new Date(experiment.start_time).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</>
-            )}
-            {experiment.start_time && experiment.end_time && (
-              <> — {new Date(experiment.end_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</>
-            )}
+          <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+            {total.toLocaleString()} изм.
+            {durationMs > 0 && <> | {fmtMs(durationMs)}</>}
           </Typography>
         )}
       </Stack>
@@ -177,11 +272,12 @@ export default function GraphsTab({ experimentId }: Props) {
 
       {loading && <Box sx={{ textAlign: 'center', p: 4 }}><CircularProgress /></Box>}
 
-      {selectedExpId && !loading && measurements.length > 0 && (
+      {selectedExpId && !loading && (viewMode === 'chart' || viewMode === 'table') && (
         <>
-          {/* Parameter chips */}
-          <Paper sx={{ p: 1, mb: 1.5 }}>
-            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* Controls bar: params + time range + step */}
+          <Paper sx={{ p: 1, mb: 1 }}>
+            {/* Parameter chips */}
+            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center', mb: 1 }}>
               <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>Параметры:</Typography>
               {PARAMS.map((p) => (
                 <Chip
@@ -198,13 +294,68 @@ export default function GraphsTab({ experimentId }: Props) {
                 />
               ))}
             </Box>
+
+            {/* Time range slider */}
+            {durationMs > 0 && (
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ minWidth: 65, textAlign: 'right' }}>
+                  {rangeFromLabel}
+                </Typography>
+                <Slider
+                  value={timeRange}
+                  onChange={(_, v) => setTimeRange(v as [number, number])}
+                  valueLabelDisplay="auto"
+                  valueLabelFormat={(v) => {
+                    if (!timeMin) return '';
+                    const t = new Date(new Date(timeMin).getTime() + (v / 100) * durationMs);
+                    return t.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                  }}
+                  size="small"
+                  sx={{ flexGrow: 1 }}
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ minWidth: 65 }}>
+                  {rangeToLabel}
+                </Typography>
+              </Stack>
+            )}
+
+            {/* Step selector + info */}
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5, flexWrap: 'wrap' }}>
+              <Typography variant="caption" color="text.secondary">Шаг:</Typography>
+              <ToggleButtonGroup value={step} exclusive size="small"
+                onChange={(_, v) => { if (v !== null) setStep(v); }}>
+                {STEP_OPTIONS.map((o) => (
+                  <ToggleButton key={o.value} value={o.value} sx={{ px: 1, py: 0.25, fontSize: '0.75rem' }}>
+                    {o.label}
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+
+              {viewMode === 'table' && (
+                <>
+                  <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>На стр:</Typography>
+                  <Select value={perPage} size="small" variant="standard"
+                    onChange={(e) => setPerPage(e.target.value as number)}
+                    sx={{ fontSize: '0.75rem', minWidth: 60 }}>
+                    {PER_PAGE_OPTIONS.map((n) => (
+                      <MenuItem key={n} value={n} sx={{ fontSize: '0.8rem' }}>{n}</MenuItem>
+                    ))}
+                  </Select>
+                </>
+              )}
+
+              <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+                {filteredTotal.toLocaleString()} строк
+                {step > 1 && <> (каждая {step}-я)</>}
+              </Typography>
+            </Stack>
           </Paper>
 
-          {viewMode === 'chart' && (
+          {measurements.length > 0 && viewMode === 'chart' && (
             <>
               <ToggleButtonGroup
                 value={chartMode} exclusive onChange={(_, v) => v && setChartMode(v)}
-                size="small" sx={{ mb: 1.5 }}
+                size="small" sx={{ mb: 1 }}
               >
                 <ToggleButton value="combined">Совмещённый</ToggleButton>
                 <ToggleButton value="separate">Раздельный</ToggleButton>
@@ -229,37 +380,68 @@ export default function GraphsTab({ experimentId }: Props) {
             </>
           )}
 
-          {viewMode === 'table' && (
-            <TableContainer component={Paper} sx={{ maxHeight: { xs: 400, md: 600 } }}>
-              <Table size="small" stickyHeader>
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>#</TableCell>
-                    <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>Время</TableCell>
-                    {visibleParams.map((p) => (
-                      <TableCell key={p.key} sx={{ fontWeight: 600, whiteSpace: 'nowrap', color: p.color }}>
-                        {p.short}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {measurements.map((m, i) => (
-                    <TableRow key={m.id} hover>
-                      <TableCell>{i + 1}</TableCell>
-                      <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                        {new Date(m.recorded_at).toLocaleTimeString('ru-RU')}
-                      </TableCell>
+          {measurements.length > 0 && viewMode === 'table' && (
+            <>
+              <TableContainer component={Paper} sx={{ maxHeight: { xs: 400, md: 550 } }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>#</TableCell>
+                      <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>Время</TableCell>
                       {visibleParams.map((p) => (
-                        <TableCell key={p.key} sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                          {fmtVal(m[p.key] as number)}
+                        <TableCell key={p.key} sx={{ fontWeight: 600, whiteSpace: 'nowrap', color: p.color }}>
+                          {p.short}
                         </TableCell>
                       ))}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                  </TableHead>
+                  <TableBody>
+                    {measurements.map((m, i) => (
+                      <TableRow key={m.id} hover>
+                        <TableCell>{(page - 1) * perPage + i + 1}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                          {new Date(m.recorded_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          <Typography component="span" sx={{ fontSize: '0.65rem', color: 'text.disabled', ml: 0.3 }}>
+                            .{String(new Date(m.recorded_at).getMilliseconds()).padStart(3, '0')}
+                          </Typography>
+                        </TableCell>
+                        {visibleParams.map((p) => (
+                          <TableCell key={p.key} sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                            {fmtVal(m[p.key] as number)}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <Stack direction="row" justifyContent="center" alignItems="center" spacing={1} sx={{ mt: 1 }}>
+                  <IconButton size="small" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+                    <NavigateBeforeIcon />
+                  </IconButton>
+                  <Pagination
+                    count={totalPages}
+                    page={page}
+                    onChange={(_, p) => setPage(p)}
+                    size="small"
+                    siblingCount={1}
+                    boundaryCount={1}
+                  />
+                  <IconButton size="small" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
+                    <NavigateNextIcon />
+                  </IconButton>
+                </Stack>
+              )}
+            </>
+          )}
+
+          {measurements.length === 0 && !error && (
+            <Paper sx={{ p: 3, textAlign: 'center' }}>
+              <Typography color="text.secondary">Нет данных в выбранном диапазоне</Typography>
+            </Paper>
           )}
         </>
       )}
@@ -275,7 +457,7 @@ export default function GraphsTab({ experimentId }: Props) {
         </Paper>
       )}
 
-      {selectedExpId && !loading && measurements.length === 0 && !error && viewMode !== 'video' && (
+      {selectedExpId && !loading && total === 0 && !error && viewMode !== 'video' && (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography color="text.secondary">Нет данных для этого эксперимента</Typography>
         </Paper>

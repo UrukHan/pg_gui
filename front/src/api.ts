@@ -100,10 +100,20 @@ export const listExperiments = () => API.get<Experiment[]>("/experiments");
 export const getExperiment = (id: number) =>
   API.get<Experiment>(`/experiments/${id}`);
 
-export const getExperimentData = (id: number) =>
-  API.get<{ experiment: Experiment; measurements: Measurement[] }>(
-    `/experiments/${id}/data`
-  );
+export const getExperimentData = (
+  id: number,
+  params?: { from?: string; to?: string; step?: number; page?: number; per_page?: number }
+) =>
+  API.get<{
+    experiment: Experiment;
+    measurements: Measurement[];
+    total: number;
+    filtered_total: number;
+    page: number;
+    per_page: number;
+    time_min: string | null;
+    time_max: string | null;
+  }>(`/experiments/${id}/data`, { params });
 
 export const getExperimentStatus = (id: number) =>
   API.get<{
