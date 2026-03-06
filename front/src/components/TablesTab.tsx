@@ -168,9 +168,30 @@ function ExperimentsSubTab({ onOpenGraphs }: { onOpenGraphs: (id: number) => voi
               <Box sx={{ px: 1.5, py: 1, bgcolor: '#f9f9f9' }}>
                 <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
                   <Box>
+                    <Typography variant="caption" color="text.secondary">Начало</Typography>
+                    <Typography variant="body2">
+                      {exp.start_time ? `${fmtDateLine1(exp.start_time)} ${fmtTimeLine2(exp.start_time)}` : '—'}
+                    </Typography>
+                  </Box>
+                  <Box>
                     <Typography variant="caption" color="text.secondary">Окончание</Typography>
                     <Typography variant="body2">
                       {exp.end_time ? `${fmtDateLine1(exp.end_time)} ${fmtTimeLine2(exp.end_time)}` : '—'}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Длительность</Typography>
+                    <Typography variant="body2">
+                      {exp.start_time && exp.end_time
+                        ? (() => {
+                            const ms = new Date(exp.end_time).getTime() - new Date(exp.start_time).getTime();
+                            const s = Math.floor(ms / 1000);
+                            if (s < 60) return `${s} сек`;
+                            const m = Math.floor(s / 60);
+                            if (m < 60) return `${m} мин ${s % 60} сек`;
+                            return `${Math.floor(m / 60)} ч ${m % 60} мин`;
+                          })()
+                        : exp.start_time ? 'идёт...' : '—'}
                     </Typography>
                   </Box>
                   <Box>

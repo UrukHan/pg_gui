@@ -47,6 +47,16 @@ export interface Camera {
   online: boolean;
 }
 
+export interface InstrumentSettings {
+  function: 'CURR' | 'RES' | 'CHAR';
+  source_on: boolean;
+  source_volt: number;
+  auto_range: boolean;
+  range: string;
+  speed: 'SLOW' | 'MED' | 'FAST';
+  zero_correct: boolean;
+}
+
 export interface Measurement {
   id: number;
   experiment_id: number;

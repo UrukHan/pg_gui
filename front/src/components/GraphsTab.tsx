@@ -13,7 +13,7 @@ import {
 } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import { Line } from 'react-chartjs-2';
-import { getExperimentData, listExperiments } from '@/api';
+import { getExperimentData, listExperiments, getExperimentVideoUrl } from '@/api';
 import type { Experiment, Measurement } from '@/types';
 
 ChartJS.register(
@@ -47,7 +47,7 @@ export default function GraphsTab({ experimentId }: Props) {
   const [error, setError] = useState('');
   const [activeParams, setActiveParams] = useState<ParamKey[]>(['voltage', 'current']);
   const [chartMode, setChartMode] = useState<'combined' | 'separate'>('combined');
-  const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
+  const [viewMode, setViewMode] = useState<'chart' | 'table' | 'video'>('chart');
 
   useEffect(() => {
     listExperiments().then((res) => setExperiments(res.data)).catch(() => {});
@@ -151,11 +151,18 @@ export default function GraphsTab({ experimentId }: Props) {
         <ToggleButtonGroup value={viewMode} exclusive onChange={(_, v) => v && setViewMode(v)} size="small">
           <ToggleButton value="chart">График</ToggleButton>
           <ToggleButton value="table">Таблица</ToggleButton>
+          {experiment?.video_path && <ToggleButton value="video">Видео</ToggleButton>}
         </ToggleButtonGroup>
 
         {experiment && (
           <Typography variant="body2" color="text.secondary">
             {experiment.name} | {measurements.length} изм.
+            {experiment.start_time && (
+              <> | {new Date(experiment.start_time).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</>
+            )}
+            {experiment.start_time && experiment.end_time && (
+              <> — {new Date(experiment.end_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</>
+            )}
           </Typography>
         )}
       </Stack>
@@ -257,7 +264,18 @@ export default function GraphsTab({ experimentId }: Props) {
         </>
       )}
 
-      {selectedExpId && !loading && measurements.length === 0 && !error && (
+      {viewMode === 'video' && experiment?.video_path && (
+        <Paper sx={{ p: 2, textAlign: 'center' }}>
+          <video
+            src={getExperimentVideoUrl(experiment.id)}
+            controls
+            autoPlay
+            style={{ width: '100%', maxHeight: '70vh', borderRadius: 8 }}
+          />
+        </Paper>
+      )}
+
+      {selectedExpId && !loading && measurements.length === 0 && !error && viewMode !== 'video' && (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography color="text.secondary">Нет данных для этого эксперимента</Typography>
         </Paper>

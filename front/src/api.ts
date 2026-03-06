@@ -5,6 +5,7 @@ import type {
   Camera,
   Experiment,
   Measurement,
+  InstrumentSettings,
 } from "./types";
 
 function getBaseURL(): string {
@@ -83,6 +84,12 @@ export const toggleInstrument = (id: number) =>
 export const pingInstrument = (id: number) =>
   API.get<{ idn: string; model: string; firmware: string; serial: string }>(`/instruments/${id}/ping`);
 
+export const getInstrumentSettings = (id: number) =>
+  API.get<InstrumentSettings>(`/instruments/${id}/settings`);
+
+export const sendInstrumentCommand = (id: number, command: string) =>
+  API.post<{ response: string }>(`/instruments/${id}/command`, { command });
+
 // --- Cameras ---
 export const listCameras = () => API.get<Camera[]>("/cameras");
 export const toggleCamera = (id: number) => API.put<Camera>(`/cameras/${id}/toggle`);
@@ -109,6 +116,7 @@ export const startExperiment = (data: {
   name: string;
   instrument_ids: string;
   notes: string;
+  settings?: InstrumentSettings;
 }) => API.post<{ experiment: Experiment }>("/experiments/start", data);
 
 export const stopExperiment = (id: number) =>

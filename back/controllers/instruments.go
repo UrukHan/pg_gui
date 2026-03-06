@@ -80,9 +80,10 @@ func PingInstrument(c *gin.Context) {
 // --- Start / Stop experiment ---
 
 type StartExperimentRequest struct {
-	Name          string `json:"name" binding:"required"`
-	InstrumentIDs string `json:"instrument_ids" binding:"required"` // comma-separated
-	Notes         string `json:"notes"`
+	Name          string                   `json:"name" binding:"required"`
+	InstrumentIDs string                   `json:"instrument_ids" binding:"required"` // comma-separated
+	Notes         string                   `json:"notes"`
+	Settings      *scpi.InstrumentSettings `json:"settings"`
 }
 
 func StartExperiment(c *gin.Context) {
@@ -113,6 +114,18 @@ func StartExperiment(c *gin.Context) {
 			return
 		}
 		instruments = append(instruments, inst)
+	}
+
+	// Apply instrument settings (or defaults)
+	settings := scpi.DefaultSettings()
+	if req.Settings != nil {
+		settings = *req.Settings
+	}
+	for _, inst := range instruments {
+		if err := scpi.ApplySettings(inst.Host, inst.Port, settings); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("failed to configure instrument %d (%s): %v", inst.ID, inst.Name, err)})
+			return
+		}
 	}
 
 	// Send FUNC:RUN to all instruments
@@ -222,4 +235,53 @@ func ExperimentStatusCheck(c *gin.Context) {
 		"polling_active":    running,
 		"measurement_count": count,
 	})
+}
+
+// GetInstrumentSettings reads current settings from the instrument
+func GetInstrumentSettings(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var inst models.Instrument
+	if err := database.DB.First(&inst, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	settings, err := scpi.ReadSettings(inst.Host, inst.Port)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, settings)
+}
+
+// SendCommand sends an arbitrary SCPI command to an instrument
+func SendCommand(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var inst models.Instrument
+	if err := database.DB.First(&inst, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+
+	var body struct {
+		Command string `json:"command" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, err := scpi.SendRaw(inst.Host, inst.Port, body.Command)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"response": resp})
 }

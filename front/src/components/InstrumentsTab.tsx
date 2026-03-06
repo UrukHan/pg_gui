@@ -5,6 +5,7 @@ import {
   Box, Paper, Typography, Button, TextField, Chip, Switch, Collapse,
   Dialog, DialogTitle, DialogContent, DialogActions, Checkbox, FormControlLabel,
   Alert, CircularProgress, Divider, Card, CardContent, Stack, IconButton,
+  ToggleButton, ToggleButtonGroup, Slider,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
@@ -18,7 +19,7 @@ import {
   startExperiment, stopExperiment, listExperiments, getExperimentStatus,
   listCameras, toggleCamera,
 } from '@/api';
-import type { Instrument, Camera, Experiment } from '@/types';
+import type { Instrument, Camera, Experiment, InstrumentSettings } from '@/types';
 
 const ALL_PARAMS = [
   { key: 'voltage', label: 'Напряжение (В)' },
@@ -47,6 +48,13 @@ export default function InstrumentsTab() {
   const [expName, setExpName] = useState('');
   const [expNotes, setExpNotes] = useState('');
   const [selectedInstruments, setSelectedInstruments] = useState<number[]>([]);
+
+  // Instrument settings
+  const [settings, setSettings] = useState<InstrumentSettings>({
+    function: 'CURR', source_on: false, source_volt: 0,
+    auto_range: true, range: '', speed: 'MED', zero_correct: true,
+  });
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Measurement params selector
   const [paramsDialogOpen, setParamsDialogOpen] = useState(false);
@@ -153,6 +161,7 @@ export default function InstrumentsTab() {
         name: expName,
         instrument_ids: selectedInstruments.join(','),
         notes: expNotes,
+        settings,
       });
       setRunningExp(res.data.experiment);
       setMeasurementCount(0);
@@ -234,6 +243,80 @@ export default function InstrumentsTab() {
               <Typography variant="body2" color="text.secondary">Нет доступных приборов</Typography>
             )}
           </Box>
+          {/* Instrument settings accordion */}
+          <Box sx={{ mb: 1.5 }}>
+            <Button size="small" variant="text" onClick={() => setSettingsOpen(!settingsOpen)}
+              startIcon={<SettingsIcon />} sx={{ textTransform: 'none' }}>
+              Настройки прибора {settingsOpen ? '▲' : '▼'}
+            </Button>
+            <Collapse in={settingsOpen}>
+              <Paper variant="outlined" sx={{ p: 1.5, mt: 0.5 }}>
+                <Stack spacing={1.5}>
+                  {/* Function */}
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Функция измерения</Typography>
+                    <ToggleButtonGroup value={settings.function} exclusive size="small"
+                      onChange={(_, v) => v && setSettings({ ...settings, function: v })}>
+                      <ToggleButton value="CURR">Ток (Ammeter)</ToggleButton>
+                      <ToggleButton value="RES">Сопротивление</ToggleButton>
+                      <ToggleButton value="CHAR">Заряд</ToggleButton>
+                    </ToggleButtonGroup>
+                  </Box>
+
+                  {/* Source */}
+                  <Box>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <FormControlLabel
+                        control={<Switch checked={settings.source_on} size="small"
+                          onChange={(e) => setSettings({ ...settings, source_on: e.target.checked })} />}
+                        label={<Typography variant="body2">Источник HV</Typography>}
+                      />
+                      {settings.source_on && (
+                        <TextField label="Напряжение, В" type="number" size="small"
+                          value={settings.source_volt}
+                          onChange={(e) => setSettings({ ...settings, source_volt: Number(e.target.value) })}
+                          inputProps={{ min: -1000, max: 1000, step: 1 }}
+                          sx={{ width: 140 }}
+                        />
+                      )}
+                    </Stack>
+                    {settings.source_on && (
+                      <Slider value={settings.source_volt} min={-1000} max={1000} step={1}
+                        onChange={(_, v) => setSettings({ ...settings, source_volt: v as number })}
+                        valueLabelDisplay="auto" size="small" sx={{ mt: 0.5, mx: 1 }}
+                      />
+                    )}
+                  </Box>
+
+                  {/* Speed */}
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Скорость измерения</Typography>
+                    <ToggleButtonGroup value={settings.speed} exclusive size="small"
+                      onChange={(_, v) => v && setSettings({ ...settings, speed: v })}>
+                      <ToggleButton value="FAST">Быстро</ToggleButton>
+                      <ToggleButton value="MED">Средне</ToggleButton>
+                      <ToggleButton value="SLOW">Точно</ToggleButton>
+                    </ToggleButtonGroup>
+                  </Box>
+
+                  {/* Range & Zero */}
+                  <Stack direction="row" spacing={2}>
+                    <FormControlLabel
+                      control={<Switch checked={settings.auto_range} size="small"
+                        onChange={(e) => setSettings({ ...settings, auto_range: e.target.checked })} />}
+                      label={<Typography variant="body2">Авто-диапазон</Typography>}
+                    />
+                    <FormControlLabel
+                      control={<Checkbox checked={settings.zero_correct} size="small"
+                        onChange={(e) => setSettings({ ...settings, zero_correct: e.target.checked })} />}
+                      label={<Typography variant="body2">Коррекция нуля</Typography>}
+                    />
+                  </Stack>
+                </Stack>
+              </Paper>
+            </Collapse>
+          </Box>
+
           <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
             Параметры: {selectedParams.length === ALL_PARAMS.length ? 'Все' : selectedParams.length + ' из ' + ALL_PARAMS.length}
           </Typography>
