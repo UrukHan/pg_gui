@@ -406,6 +406,7 @@ export default function InstrumentsTab() {
                 onChange={(e) => { e.stopPropagation(); handleToggle(inst.id); }}
                 onClick={(e) => e.stopPropagation()}
                 size="small"
+                disabled={!inst.online && !inst.active}
                 sx={{ flexShrink: 0 }}
               />
               {expandedId === inst.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
@@ -464,16 +465,17 @@ export default function InstrumentsTab() {
                     sx={{ mr: 1 }}
                   />
                   <Chip
-                    label={cam.active ? 'Запись вкл' : 'Запись выкл'}
-                    color={cam.active ? 'success' : 'default'}
+                    label={cam.online ? (cam.active ? 'Запись вкл' : 'Запись выкл') : 'Недоступна'}
+                    color={cam.online ? (cam.active ? 'success' : 'default') : 'error'}
                     size="small"
-                    variant={cam.active ? 'filled' : 'outlined'}
+                    variant={cam.online && cam.active ? 'filled' : 'outlined'}
                     sx={{ mr: 1 }}
                   />
                   <Switch
                     checked={cam.active}
                     onChange={() => handleToggleCamera(cam.id)}
                     size="small"
+                    disabled={!cam.online}
                   />
                 </Box>
               </Paper>

@@ -5,7 +5,7 @@ import {
   Box, Paper, IconButton, Button, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, Select, MenuItem, FormControlLabel,
   Switch, Alert, CircularProgress, Chip, InputLabel, FormControl,
-  Typography, Stack, Collapse, Divider,
+  Typography, Stack, Collapse, Divider, useMediaQuery, useTheme,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -20,6 +20,8 @@ import type { User, UserPermission } from '@/types';
 export default function UsersTab() {
   const { user: currentUser } = useAuth();
   const isAdmin = currentUser?.role === 'admin';
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,69 +116,93 @@ export default function UsersTab() {
       )}
 
       <Stack spacing={1}>
-        {users.map((u) => (
-          <Paper key={u.id} variant="outlined" sx={{ overflow: 'hidden' }}>
-            <Box
-              sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 1, cursor: 'pointer', '&:hover': { bgcolor: '#fafafa' } }}
-              onClick={() => setExpandedId(expandedId === u.id ? null : u.id)}
-            >
-              <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                <Typography variant="body2" fontWeight={600} noWrap>{u.first_name}</Typography>
-                <Typography variant="caption" color="text.secondary" noWrap>{u.last_name}</Typography>
+        {users.map((u) => {
+          const editBtn = isAdmin && (
+            <IconButton size="small" onClick={(e) => {
+              e.stopPropagation();
+              setEditingUser(u);
+              setForm({
+                first_name: u.first_name, last_name: u.last_name, position: u.position,
+                login: u.login, password: '', permission: u.permission, instrument_access: u.instrument_access,
+              });
+              setDialogOpen(true);
+            }}>
+              <EditIcon fontSize="small" />
+            </IconButton>
+          );
+          const deleteBtn = isAdmin && u.role !== 'admin' && (
+            <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleDelete(u.id); }}>
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          );
+
+          if (!isMobile) {
+            // Desktop: single row with all info
+            return (
+              <Paper key={u.id} variant="outlined">
+                <Box sx={{ display: 'flex', alignItems: 'center', px: 2, py: 1, gap: 2, '&:hover': { bgcolor: '#fafafa' } }}>
+                  <Typography variant="body2" fontWeight={600} sx={{ minWidth: 100 }} noWrap>
+                    {u.first_name} {u.last_name}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ minWidth: 100, flexShrink: 0 }} noWrap>
+                    {u.position || '—'}
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontFamily: 'monospace', minWidth: 80, flexShrink: 0 }} noWrap>
+                    {u.login}
+                  </Typography>
+                  <Chip label={roleLabel(u.role)} color={u.role === 'admin' ? 'warning' : 'default'} size="small" sx={{ flexShrink: 0 }} />
+                  <Chip label={permLabel(u.permission)} size="small" variant="outlined" sx={{ flexShrink: 0 }} />
+                  <Chip
+                    label={u.instrument_access ? 'Приборы' : 'Без приб.'}
+                    color={u.instrument_access ? 'success' : 'default'}
+                    size="small" variant="outlined" sx={{ flexShrink: 0 }}
+                  />
+                  <Box sx={{ flexGrow: 1 }} />
+                  {editBtn}
+                  {deleteBtn}
+                </Box>
+              </Paper>
+            );
+          }
+
+          // Mobile: expandable
+          return (
+            <Paper key={u.id} variant="outlined" sx={{ overflow: 'hidden' }}>
+              <Box
+                sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 1, cursor: 'pointer', '&:hover': { bgcolor: '#fafafa' } }}
+                onClick={() => setExpandedId(expandedId === u.id ? null : u.id)}
+              >
+                <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                  <Typography variant="body2" fontWeight={600} noWrap>{u.first_name} {u.last_name}</Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>{u.position || u.login}</Typography>
+                </Box>
+                <Chip label={roleLabel(u.role)} color={u.role === 'admin' ? 'warning' : 'default'} size="small" sx={{ flexShrink: 0, mx: 0.5 }} />
+                {editBtn}
+                {deleteBtn}
+                {expandedId === u.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
               </Box>
-              <Chip
-                label={roleLabel(u.role)}
-                color={u.role === 'admin' ? 'warning' : 'default'}
-                size="small"
-                sx={{ flexShrink: 0, mx: 0.5 }}
-              />
-              {isAdmin && (
-                <>
-                  <IconButton size="small" onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingUser(u);
-                    setForm({
-                      first_name: u.first_name, last_name: u.last_name, position: u.position,
-                      login: u.login, password: '', permission: u.permission, instrument_access: u.instrument_access,
-                    });
-                    setDialogOpen(true);
-                  }}>
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                  {u.role !== 'admin' && (
-                    <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleDelete(u.id); }}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  )}
-                </>
-              )}
-              {expandedId === u.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-            </Box>
-            <Collapse in={expandedId === u.id}>
-              <Divider />
-              <Box sx={{ px: 1.5, py: 1, bgcolor: '#f9f9f9' }}>
-                <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">Должность</Typography>
-                    <Typography variant="body2" fontWeight={500}>{u.position || '—'}</Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">Логин</Typography>
-                    <Typography variant="body2" fontWeight={500}>{u.login}</Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">Доступ</Typography>
-                    <Typography variant="body2" fontWeight={500}>{permLabel(u.permission)}</Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">Приборы</Typography>
-                    <Chip label={u.instrument_access ? 'Да' : 'Нет'} color={u.instrument_access ? 'success' : 'default'} size="small" />
-                  </Box>
-                </Stack>
-              </Box>
-            </Collapse>
-          </Paper>
-        ))}
+              <Collapse in={expandedId === u.id}>
+                <Divider />
+                <Box sx={{ px: 1.5, py: 1, bgcolor: '#f9f9f9' }}>
+                  <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Логин</Typography>
+                      <Typography variant="body2" fontWeight={500}>{u.login}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Доступ</Typography>
+                      <Typography variant="body2" fontWeight={500}>{permLabel(u.permission)}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Приборы</Typography>
+                      <Chip label={u.instrument_access ? 'Да' : 'Нет'} color={u.instrument_access ? 'success' : 'default'} size="small" />
+                    </Box>
+                  </Stack>
+                </Box>
+              </Collapse>
+            </Paper>
+          );
+        })}
         {users.length === 0 && (
           <Paper sx={{ p: 3, textAlign: 'center' }}>
             <Typography color="text.secondary">Нет пользователей</Typography>

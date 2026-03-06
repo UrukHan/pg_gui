@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Paper, IconButton, Button, Dialog, DialogTitle,
   DialogContent, DialogActions, Alert, CircularProgress, Chip,
-  Typography, Stack, Collapse, Divider,
+  Typography, Stack, Collapse, Divider, TextField, FormControl,
+  InputLabel, Select, MenuItem,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -14,9 +15,9 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useAuth } from '@/context/AuthContext';
 import {
-  listExperiments, deleteExperiment, getExperimentVideoUrl,
+  listExperiments, deleteExperiment, getExperimentVideoUrl, listUsers,
 } from '@/api';
-import type { Experiment } from '@/types';
+import type { Experiment, User } from '@/types';
 import dynamic from 'next/dynamic';
 
 const GraphsTab = dynamic(() => import('@/components/GraphsTab'), { ssr: false });
@@ -27,18 +28,25 @@ export default function ExperimentsTab() {
   const canDelete = isAdmin || currentUser?.permission === 'read_write_all';
 
   const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+
+  // Filters
+  const [filterUser, setFilterUser] = useState<number | ''>('');
+  const [filterFrom, setFilterFrom] = useState('');
+  const [filterTo, setFilterTo] = useState('');
 
   // Detail view: which experiment to show
   const [detailId, setDetailId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await listExperiments();
-      setExperiments(res.data);
+      const [expRes, usrRes] = await Promise.all([listExperiments(), listUsers()]);
+      setExperiments(expRes.data);
+      setUsers(usrRes.data);
     } catch {
       setError('Ошибка загрузки экспериментов');
     } finally {
@@ -47,6 +55,14 @@ export default function ExperimentsTab() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Filtered experiments
+  const filtered = experiments.filter((exp) => {
+    if (filterUser && exp.user_id !== filterUser) return false;
+    if (filterFrom && exp.start_time && new Date(exp.start_time) < new Date(filterFrom)) return false;
+    if (filterTo && exp.start_time && new Date(exp.start_time) > new Date(filterTo + 'T23:59:59')) return false;
+    return true;
+  });
 
   const handleDelete = async (id: number) => {
     if (!confirm('Удалить эксперимент и все его данные?')) return;
@@ -121,8 +137,41 @@ export default function ExperimentsTab() {
     <Box>
       {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError('')}>{error}</Alert>}
 
+      {/* Filters */}
+      <Paper variant="outlined" sx={{ p: 1, mb: 1.5 }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel>Пользователь</InputLabel>
+            <Select value={filterUser} label="Пользователь" onChange={(e) => setFilterUser(e.target.value as number | '')}>
+              <MenuItem value="">Все</MenuItem>
+              {users.map((u) => (
+                <MenuItem key={u.id} value={u.id}>{u.first_name} {u.last_name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            label="С даты" type="date" size="small"
+            value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)}
+            slotProps={{ inputLabel: { shrink: true } }}
+            sx={{ minWidth: 140 }}
+          />
+          <TextField
+            label="По дату" type="date" size="small"
+            value={filterTo} onChange={(e) => setFilterTo(e.target.value)}
+            slotProps={{ inputLabel: { shrink: true } }}
+            sx={{ minWidth: 140 }}
+          />
+          {(filterUser || filterFrom || filterTo) && (
+            <Button size="small" onClick={() => { setFilterUser(''); setFilterFrom(''); setFilterTo(''); }}>Сбросить</Button>
+          )}
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+            {filtered.length} из {experiments.length}
+          </Typography>
+        </Stack>
+      </Paper>
+
       <Stack spacing={1}>
-        {experiments.map((exp) => (
+        {filtered.map((exp) => (
           <Paper key={exp.id} variant="outlined" sx={{ overflow: 'hidden' }}>
             <Box
               sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 1, cursor: 'pointer', '&:hover': { bgcolor: '#fafafa' } }}
@@ -217,9 +266,11 @@ export default function ExperimentsTab() {
             </Collapse>
           </Paper>
         ))}
-        {experiments.length === 0 && (
+        {filtered.length === 0 && (
           <Paper sx={{ p: 3, textAlign: 'center' }}>
-            <Typography color="text.secondary">Нет экспериментов</Typography>
+            <Typography color="text.secondary">
+              {experiments.length === 0 ? 'Нет экспериментов' : 'Нет экспериментов по заданным фильтрам'}
+            </Typography>
           </Paper>
         )}
       </Stack>
