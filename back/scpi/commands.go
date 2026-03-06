@@ -64,15 +64,18 @@ func ApplySettings(host string, port int, s InstrumentSettings) error {
 	return nil
 }
 
-// buildSettingsCommands converts settings into ordered SCPI commands for TH2690
-// TH2690 syntax: sub-commands use colon (FUNC:STOP), value-set uses space (FUNC CURR, SPEED MED)
+// buildSettingsCommands converts settings into ordered SCPI commands for TH2690.
+// TH2690 has limited remote control; many commands may return Error 5.
+// Critical: SYST:ZCH OFF disables zero check (which shorts input → all reads = 0).
 func buildSettingsCommands(s InstrumentSettings) []string {
 	var cmds []string
 
-	// NOTE: Do NOT send FUNC:STOP here — it disrupts front-panel measurement state.
-	// FUNC:RUN is sent separately by StartExperiment after settings are applied.
+	// 1. Disable zero check — THIS IS CRITICAL
+	// When zero check is ON (default after power-on), input is shorted and all measurements = 0
+	cmds = append(cmds, "SYST:ZCH OFF")
+	cmds = append(cmds, "KEY ZCHK") // fallback: simulate front-panel ZCHK key press
 
-	// 1. Set measurement function (space, not colon — FUNC CURR, FUNC RES, FUNC CHAR)
+	// 2. Set measurement function
 	switch s.Function {
 	case "RES":
 		cmds = append(cmds, "FUNC RES")
@@ -82,11 +85,11 @@ func buildSettingsCommands(s InstrumentSettings) []string {
 		cmds = append(cmds, "FUNC CURR")
 	}
 
-	// 3. Measurement speed (space, not colon — SPEED MED, SPEED FAST, SPEED SLOW)
+	// 3. Measurement speed
 	speed := FrequencyToSpeed(s.Frequency)
 	cmds = append(cmds, "SPEED "+speed)
 
-	// 4. Range (RANG:AUTO is a valid SCPI sub-path)
+	// 4. Range
 	if s.AutoRange {
 		cmds = append(cmds, "RANG:AUTO ON")
 	} else {
@@ -101,7 +104,7 @@ func buildSettingsCommands(s InstrumentSettings) []string {
 		cmds = append(cmds, "ZERO:CORR")
 	}
 
-	// 6. Source voltage (SOUR:VOLT and SOUR:STAT are valid SCPI sub-paths)
+	// 6. Source voltage
 	if s.SourceOn {
 		cmds = append(cmds, fmt.Sprintf("SOUR:VOLT %.3f", s.SourceVolt))
 		cmds = append(cmds, "SOUR:STAT ON")
