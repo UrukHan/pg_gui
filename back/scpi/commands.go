@@ -59,27 +59,28 @@ func ApplySettings(host string, port int, s InstrumentSettings) error {
 }
 
 // buildSettingsCommands converts settings into ordered SCPI commands for TH2690
+// TH2690 syntax: sub-commands use colon (FUNC:STOP), value-set uses space (FUNC CURR, SPEED MED)
 func buildSettingsCommands(s InstrumentSettings) []string {
 	var cmds []string
 
 	// 1. Stop any running measurement
 	cmds = append(cmds, "FUNC:STOP")
 
-	// 2. Set measurement function
+	// 2. Set measurement function (space, not colon — FUNC CURR, FUNC RES, FUNC CHAR)
 	switch s.Function {
 	case "RES":
-		cmds = append(cmds, "FUNC:RES")
+		cmds = append(cmds, "FUNC RES")
 	case "CHAR":
-		cmds = append(cmds, "FUNC:CHAR")
+		cmds = append(cmds, "FUNC CHAR")
 	default:
-		cmds = append(cmds, "FUNC:CURR")
+		cmds = append(cmds, "FUNC CURR")
 	}
 
-	// 3. Measurement speed (derived from frequency)
+	// 3. Measurement speed (space, not colon — SPEED MED, SPEED FAST, SPEED SLOW)
 	speed := FrequencyToSpeed(s.Frequency)
-	cmds = append(cmds, "SPEED:"+speed)
+	cmds = append(cmds, "SPEED "+speed)
 
-	// 4. Range
+	// 4. Range (RANG:AUTO is a valid SCPI sub-path)
 	if s.AutoRange {
 		cmds = append(cmds, "RANG:AUTO ON")
 	} else {
@@ -94,7 +95,7 @@ func buildSettingsCommands(s InstrumentSettings) []string {
 		cmds = append(cmds, "ZERO:CORR")
 	}
 
-	// 6. Source voltage
+	// 6. Source voltage (SOUR:VOLT and SOUR:STAT are valid SCPI sub-paths)
 	if s.SourceOn {
 		cmds = append(cmds, fmt.Sprintf("SOUR:VOLT %.3f", s.SourceVolt))
 		cmds = append(cmds, "SOUR:STAT ON")
