@@ -21,6 +21,22 @@ func ListCameras(c *gin.Context) {
 	c.JSON(http.StatusOK, cameras)
 }
 
+func ToggleCamera(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var cam models.Camera
+	if err := database.DB.First(&cam, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "camera not found"})
+		return
+	}
+	cam.Active = !cam.Active
+	database.DB.Save(&cam)
+	c.JSON(http.StatusOK, cam)
+}
+
 func GetExperimentVideo(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"back/database"
+	"back/models"
 	"back/storage"
 )
 
@@ -86,7 +88,26 @@ func (m *Manager) Start(experimentID uint) {
 		return // already recording
 	}
 
-	cam := Cameras[0] // use first camera
+	// Check if any camera is active in DB
+	var activeCam models.Camera
+	if err := database.DB.Where("active = ?", true).First(&activeCam).Error; err != nil {
+		log.Printf("[Recorder] No active cameras, skipping video for exp=%d", experimentID)
+		return
+	}
+
+	// Find matching config by RTSP URL
+	var cam CameraConfig
+	found := false
+	for _, c := range Cameras {
+		if c.RTSPURL == activeCam.RTSPURL {
+			cam = c
+			found = true
+			break
+		}
+	}
+	if !found {
+		cam = CameraConfig{Name: activeCam.Name, RTSPURL: activeCam.RTSPURL}
+	}
 	tmpDir := os.TempDir()
 	fileName := fmt.Sprintf("exp_%d.mp4", experimentID)
 	filePath := filepath.Join(tmpDir, fileName)

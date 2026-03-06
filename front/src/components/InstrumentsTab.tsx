@@ -16,7 +16,7 @@ import VideocamIcon from '@mui/icons-material/Videocam';
 import {
   listInstruments, toggleInstrument, pingInstrument,
   startExperiment, stopExperiment, listExperiments, getExperimentStatus,
-  listCameras,
+  listCameras, toggleCamera,
 } from '@/api';
 import type { Instrument, Camera, Experiment } from '@/types';
 
@@ -120,6 +120,15 @@ export default function InstrumentsTab() {
       loadInstruments();
     } catch (e: any) {
       setError(e.response?.data?.error || 'Прибор не отвечает');
+    }
+  };
+
+  const handleToggleCamera = async (id: number) => {
+    try {
+      await toggleCamera(id);
+      loadInstruments();
+    } catch (e: any) {
+      setError(e.response?.data?.error || 'Ошибка переключения камеры');
     }
   };
 
@@ -320,10 +329,16 @@ export default function InstrumentsTab() {
                     </Typography>
                   </Box>
                   <Chip
-                    label={cam.active ? 'Активна' : 'Выкл'}
+                    label={cam.active ? 'Запись вкл' : 'Запись выкл'}
                     color={cam.active ? 'success' : 'default'}
                     size="small"
                     variant={cam.active ? 'filled' : 'outlined'}
+                    sx={{ mr: 1 }}
+                  />
+                  <Switch
+                    checked={cam.active}
+                    onChange={() => handleToggleCamera(cam.id)}
+                    size="small"
                   />
                 </Box>
               </Paper>

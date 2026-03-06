@@ -85,6 +85,7 @@ export const pingInstrument = (id: number) =>
 
 // --- Cameras ---
 export const listCameras = () => API.get<Camera[]>("/cameras");
+export const toggleCamera = (id: number) => API.put<Camera>(`/cameras/${id}/toggle`);
 
 // --- Experiments ---
 export const listExperiments = () => API.get<Experiment[]>("/experiments");

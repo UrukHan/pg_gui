@@ -67,6 +67,7 @@ func main() {
 
 		// Cameras
 		auth.GET("/cameras", controllers.ListCameras)
+		auth.PUT("/cameras/:id/toggle", controllers.ToggleCamera)
 
 		// Experiments
 		auth.GET("/experiments", controllers.ListExperiments)
