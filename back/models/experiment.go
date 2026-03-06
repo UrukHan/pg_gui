@@ -21,6 +21,7 @@ type Experiment struct {
 	EndTime       *time.Time       `json:"end_time"`
 	InstrumentIDs string           `gorm:"size:500" json:"instrument_ids"` // comma-separated IDs
 	Notes         string           `gorm:"type:text" json:"notes"`
+	SettingsJSON  string           `gorm:"type:text" json:"settings_json"` // JSON: map[instrumentId]InstrumentSettings
 	VideoPath     string           `gorm:"size:500" json:"video_path"`
 	CreatedAt     time.Time        `json:"created_at"`
 	UpdatedAt     time.Time        `json:"updated_at"`

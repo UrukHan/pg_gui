@@ -9,7 +9,6 @@ import {
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
-import SettingsIcon from '@mui/icons-material/Settings';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
@@ -21,17 +20,6 @@ import {
   listCameras, toggleCamera,
 } from '@/api';
 import type { Instrument, Camera, Experiment, InstrumentSettings } from '@/types';
-
-const ALL_PARAMS = [
-  { key: 'voltage', label: 'Напряжение (В)' },
-  { key: 'current', label: 'Ток (А)' },
-  { key: 'charge', label: 'Заряд (Кл)' },
-  { key: 'resistance', label: 'Сопротивление (Ом)' },
-  { key: 'temperature', label: 'Температура (°C)' },
-  { key: 'humidity', label: 'Влажность (%)' },
-  { key: 'source', label: 'Источник' },
-  { key: 'math_value', label: 'Math' },
-];
 
 export default function InstrumentsTab() {
   const { user } = useAuth();
@@ -50,17 +38,25 @@ export default function InstrumentsTab() {
   const [expNotes, setExpNotes] = useState('');
   const [selectedInstruments, setSelectedInstruments] = useState<number[]>([]);
 
-  // Instrument settings
-  const [settings, setSettings] = useState<InstrumentSettings>({
+  // Per-instrument settings: key = instrument ID as string
+  const defaultSettings = (): InstrumentSettings => ({
     function: 'CURR', source_on: false, source_volt: 0,
-    auto_range: true, range: '', speed: 'MED', zero_correct: true,
+    auto_range: true, range: '', frequency: 5, zero_correct: true,
   });
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsMap, setSettingsMap] = useState<Record<string, InstrumentSettings>>({});
   const [infoOpen, setInfoOpen] = useState(false);
 
-  // Measurement params selector
-  const [paramsDialogOpen, setParamsDialogOpen] = useState(false);
-  const [selectedParams, setSelectedParams] = useState<string[]>(ALL_PARAMS.map((p) => p.key));
+  // Which instrument settings are being edited
+  const [configInstId, setConfigInstId] = useState<number | null>(null);
+
+  // Helper: get settings for an instrument (with defaults)
+  const getSettings = (id: number): InstrumentSettings => settingsMap[String(id)] || defaultSettings();
+  const updateSettings = (id: number, patch: Partial<InstrumentSettings>) => {
+    setSettingsMap((prev) => ({
+      ...prev,
+      [String(id)]: { ...(prev[String(id)] || defaultSettings()), ...patch },
+    }));
+  };
 
   // Running experiment tracking
   const [runningExp, setRunningExp] = useState<Experiment | null>(null);
@@ -142,15 +138,17 @@ export default function InstrumentsTab() {
     }
   };
 
+  // Auto-select first online instrument for config
+  useEffect(() => {
+    const online = instruments.filter((i) => i.active && i.online);
+    if (online.length > 0 && configInstId === null) {
+      setConfigInstId(online[0].id);
+    }
+  }, [instruments, configInstId]);
+
   const toggleInstrumentSelection = (id: number) => {
     setSelectedInstruments((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  };
-
-  const toggleParam = (key: string) => {
-    setSelectedParams((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
     );
   };
 
@@ -159,11 +157,16 @@ export default function InstrumentsTab() {
     if (selectedInstruments.length === 0) { setError('Выберите хотя бы один прибор'); return; }
     setError('');
     try {
+      // Build per-instrument settings map for backend
+      const settingsPayload: Record<string, InstrumentSettings> = {};
+      for (const id of selectedInstruments) {
+        settingsPayload[String(id)] = getSettings(id);
+      }
       const res = await startExperiment({
         name: expName,
         instrument_ids: selectedInstruments.join(','),
         notes: expNotes,
-        settings,
+        settings: settingsPayload,
       });
       setRunningExp(res.data.experiment);
       setMeasurementCount(0);
@@ -222,22 +225,18 @@ export default function InstrumentsTab() {
         <Paper sx={{ p: { xs: 1.5, sm: 2 }, mb: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
             <Typography variant="subtitle1" fontWeight={600}>Запуск эксперимента</Typography>
-            <Stack direction="row" spacing={0.5}>
-              <IconButton size="small" onClick={() => setInfoOpen(true)} title="Справка по настройкам">
-                <InfoOutlinedIcon fontSize="small" />
-              </IconButton>
-              <IconButton size="small" onClick={() => setParamsDialogOpen(true)} title="Параметры измерения">
-                <SettingsIcon fontSize="small" />
-              </IconButton>
-            </Stack>
+            <IconButton size="small" onClick={() => setInfoOpen(true)} title="Справка">
+              <InfoOutlinedIcon fontSize="small" />
+            </IconButton>
           </Stack>
+
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1.5 }}>
             <TextField label="Название" value={expName} onChange={(e) => setExpName(e.target.value)} fullWidth size="small" />
             <TextField label="Заметки" value={expNotes} onChange={(e) => setExpNotes(e.target.value)} fullWidth size="small" />
           </Stack>
 
           {/* Instrument selection */}
-          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Приборы для записи:</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Приборы:</Typography>
           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1.5 }}>
             {instruments.filter((i) => i.active && i.online).map((inst) => (
               <Chip
@@ -254,23 +253,42 @@ export default function InstrumentsTab() {
             )}
           </Box>
 
-          {/* Instrument settings accordion */}
-          <Box sx={{ mb: 1.5 }}>
-            <Button size="small" variant="text" onClick={() => setSettingsOpen(!settingsOpen)}
-              startIcon={settingsOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-              sx={{ textTransform: 'none', color: 'text.secondary' }}>
-              Настройки электрометра
-            </Button>
-            <Collapse in={settingsOpen}>
-              <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 }, mt: 0.5 }}>
+          {/* Per-instrument settings — always visible */}
+          {(() => {
+            const onlineInsts = instruments.filter((i) => i.active && i.online);
+            if (onlineInsts.length === 0) return null;
+            const cid = configInstId ?? onlineInsts[0]?.id;
+            if (!cid) return null;
+            const s = getSettings(cid);
+            const upd = (patch: Partial<InstrumentSettings>) => updateSettings(cid, patch);
+            return (
+              <Paper variant="outlined" sx={{ p: { xs: 1, sm: 1.5 }, mb: 1.5 }}>
+                {/* Instrument selector tabs */}
+                {onlineInsts.length > 1 && (
+                  <ToggleButtonGroup value={cid} exclusive size="small" sx={{ mb: 1.5, flexWrap: 'wrap' }}
+                    onChange={(_, v) => { if (v !== null) setConfigInstId(v); }}>
+                    {onlineInsts.map((inst) => {
+                      const is = getSettings(inst.id);
+                      return (
+                        <ToggleButton key={inst.id} value={inst.id}
+                          sx={{ px: 1.5, py: 0.5, fontSize: '0.75rem', textTransform: 'none' }}>
+                          {inst.model || inst.name}
+                          <Chip label={is.function} size="small" sx={{ ml: 0.5, height: 18, fontSize: '0.65rem' }}
+                            color={is.function === 'CURR' ? 'error' : is.function === 'RES' ? 'warning' : 'info'} />
+                        </ToggleButton>
+                      );
+                    })}
+                  </ToggleButtonGroup>
+                )}
+
                 <Stack spacing={1.5}>
-                  {/* Function — single measurement mode */}
+                  {/* Measurement mode */}
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-                      Режим измерения <Typography component="span" variant="caption" color="warning.main">(одновременно только один)</Typography>
+                      Режим измерения <Typography component="span" variant="caption" color="warning.main">(один из трёх)</Typography>
                     </Typography>
-                    <ToggleButtonGroup value={settings.function} exclusive size="small" fullWidth
-                      onChange={(_, v) => v && setSettings({ ...settings, function: v })}
+                    <ToggleButtonGroup value={s.function} exclusive size="small" fullWidth
+                      onChange={(_, v) => v && upd({ function: v })}
                       sx={{ '& .MuiToggleButton-root': { flex: 1, fontSize: { xs: '0.7rem', sm: '0.8rem' }, px: { xs: 0.5, sm: 1.5 } } }}>
                       <ToggleButton value="CURR">Ток (A)</ToggleButton>
                       <ToggleButton value="RES">Сопр. (R)</ToggleButton>
@@ -278,72 +296,72 @@ export default function InstrumentsTab() {
                     </ToggleButtonGroup>
                   </Box>
 
+                  {/* Frequency + options row */}
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
+                    <TextField label="Частота, Гц" type="number" size="small"
+                      value={s.frequency}
+                      onChange={(e) => {
+                        let v = Number(e.target.value);
+                        if (v < 1) v = 1; if (v > 20) v = 20;
+                        upd({ frequency: v });
+                      }}
+                      inputProps={{ min: 1, max: 20, step: 1 }}
+                      sx={{ width: { xs: '100%', sm: 110 } }}
+                      helperText={`${s.frequency} зам./сек`}
+                    />
+                    <FormControlLabel
+                      control={<Switch checked={s.auto_range} size="small"
+                        onChange={(e) => upd({ auto_range: e.target.checked })} />}
+                      label={<Typography variant="body2">Авто-диапазон</Typography>}
+                    />
+                    <FormControlLabel
+                      control={<Checkbox checked={s.zero_correct} size="small"
+                        onChange={(e) => upd({ zero_correct: e.target.checked })} />}
+                      label={<Typography variant="body2">Корр. нуля</Typography>}
+                    />
+                  </Stack>
+
                   {/* Source HV */}
                   <Box>
                     <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
                       <FormControlLabel
-                        control={<Switch checked={settings.source_on} size="small"
-                          onChange={(e) => setSettings({ ...settings, source_on: e.target.checked })} />}
+                        control={<Switch checked={s.source_on} size="small"
+                          onChange={(e) => upd({ source_on: e.target.checked })} />}
                         label={<Typography variant="body2">Источник HV</Typography>}
                         sx={{ mr: 0 }}
                       />
-                      {settings.source_on && (
+                      {s.source_on && (
                         <TextField label="В" type="number" size="small"
-                          value={settings.source_volt}
-                          onChange={(e) => setSettings({ ...settings, source_volt: Number(e.target.value) })}
+                          value={s.source_volt}
+                          onChange={(e) => upd({ source_volt: Number(e.target.value) })}
                           inputProps={{ min: -1000, max: 1000, step: 1 }}
                           sx={{ width: { xs: 90, sm: 120 } }}
                         />
                       )}
                     </Stack>
-                    {settings.source_on && (
-                      <Slider value={settings.source_volt} min={-1000} max={1000} step={1}
-                        onChange={(_, v) => setSettings({ ...settings, source_volt: v as number })}
+                    {s.source_on && (
+                      <Slider value={s.source_volt} min={-1000} max={1000} step={1}
+                        onChange={(_, v) => upd({ source_volt: v as number })}
                         valueLabelDisplay="auto" size="small"
                         marks={[{ value: -1000, label: '-1kV' }, { value: 0, label: '0' }, { value: 1000, label: '1kV' }]}
                         sx={{ mt: 0.5, mx: 1 }}
                       />
                     )}
                   </Box>
-
-                  {/* Speed */}
-                  <Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Скорость</Typography>
-                    <ToggleButtonGroup value={settings.speed} exclusive size="small"
-                      onChange={(_, v) => v && setSettings({ ...settings, speed: v })}
-                      sx={{ '& .MuiToggleButton-root': { fontSize: { xs: '0.7rem', sm: '0.8rem' }, px: { xs: 1, sm: 1.5 } } }}>
-                      <ToggleButton value="FAST">Быстро</ToggleButton>
-                      <ToggleButton value="MED">Средне</ToggleButton>
-                      <ToggleButton value="SLOW">Точно</ToggleButton>
-                    </ToggleButtonGroup>
-                  </Box>
-
-                  {/* Range & Zero — compact row */}
-                  <Stack direction="row" spacing={{ xs: 1, sm: 2 }} flexWrap="wrap">
-                    <FormControlLabel
-                      control={<Switch checked={settings.auto_range} size="small"
-                        onChange={(e) => setSettings({ ...settings, auto_range: e.target.checked })} />}
-                      label={<Typography variant="body2" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>Авто-диапазон</Typography>}
-                    />
-                    <FormControlLabel
-                      control={<Checkbox checked={settings.zero_correct} size="small"
-                        onChange={(e) => setSettings({ ...settings, zero_correct: e.target.checked })} />}
-                      label={<Typography variant="body2" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>Коррекция нуля</Typography>}
-                    />
-                  </Stack>
                 </Stack>
               </Paper>
-            </Collapse>
-          </Box>
+            );
+          })()}
 
-          {/* Bottom: params summary + start button */}
+          {/* Summary + Start button */}
           <Stack direction="row" alignItems="center" justifyContent="space-between">
             <Typography variant="caption" color="text.secondary">
-              {selectedParams.length === ALL_PARAMS.length ? 'Все параметры' : `${selectedParams.length}/${ALL_PARAMS.length} парам.`}
-              {settings.function === 'CURR' && ' | Ток'}
-              {settings.function === 'RES' && ' | Сопр.'}
-              {settings.function === 'CHAR' && ' | Заряд'}
-              {settings.source_on && ` | HV ${settings.source_volt}В`}
+              {selectedInstruments.map((id) => {
+                const s = getSettings(id);
+                const inst = instruments.find((i) => i.id === id);
+                const name = inst?.model || inst?.name || `#${id}`;
+                return `${name}: ${s.function} ${s.frequency}Гц`;
+              }).join(' | ')}
             </Typography>
             <Button
               variant="contained" color="success" startIcon={<PlayArrowIcon />}
@@ -464,40 +482,11 @@ export default function InstrumentsTab() {
         </>
       )}
 
-      {/* Params selector dialog */}
-      <Dialog open={paramsDialogOpen} onClose={() => setParamsDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Параметры измерения</DialogTitle>
-        <DialogContent>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={selectedParams.length === ALL_PARAMS.length}
-                indeterminate={selectedParams.length > 0 && selectedParams.length < ALL_PARAMS.length}
-                onChange={() => setSelectedParams(selectedParams.length === ALL_PARAMS.length ? [] : ALL_PARAMS.map((p) => p.key))}
-              />
-            }
-            label="Выбрать все"
-          />
-          <Divider sx={{ my: 1 }} />
-          {ALL_PARAMS.map((p) => (
-            <FormControlLabel
-              key={p.key}
-              control={<Checkbox checked={selectedParams.includes(p.key)} onChange={() => toggleParam(p.key)} size="small" />}
-              label={p.label}
-              sx={{ display: 'block' }}
-            />
-          ))}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setParamsDialogOpen(false)} variant="contained" size="small">Готово</Button>
-        </DialogActions>
-      </Dialog>
-
       {/* Info dialog */}
       <Dialog open={infoOpen} onClose={() => setInfoOpen(false)} maxWidth="sm" fullWidth
         PaperProps={{ sx: { maxHeight: '85vh' } }}>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <InfoOutlinedIcon color="info" /> Справка: настройки эксперимента
+          <InfoOutlinedIcon color="info" /> Справка
         </DialogTitle>
         <DialogContent dividers>
           <Typography variant="subtitle2" color="primary" gutterBottom>Режим измерения</Typography>
@@ -505,49 +494,44 @@ export default function InstrumentsTab() {
             Электрометр TH2690 измеряет <b>только один параметр</b> за раз:
           </Typography>
           <Box component="ul" sx={{ mt: 0, pl: 2.5, '& li': { mb: 0.5 } }}>
-            <li><Typography variant="body2"><b>Ток (A)</b> — амперметр, измерение постоянного тока. Диапазон от фА до мА.</Typography></li>
-            <li><Typography variant="body2"><b>Сопр. (R)</b> — омметр, измерение сопротивления. Для высокоомных материалов.</Typography></li>
-            <li><Typography variant="body2"><b>Заряд (Q)</b> — кулонметр, измерение накопленного заряда.</Typography></li>
+            <li><Typography variant="body2"><b>Ток (A)</b> — амперметр. Диапазон: фА – мА.</Typography></li>
+            <li><Typography variant="body2"><b>Сопр. (R)</b> — омметр. Для высокоомных материалов.</Typography></li>
+            <li><Typography variant="body2"><b>Заряд (Q)</b> — кулонметр. Накопленный заряд.</Typography></li>
           </Box>
           <Typography variant="body2" color="text.secondary" paragraph>
-            Остальные поля (напряжение, температура, влажность) записываются всегда.
+            Напряжение, температура, влажность записываются всегда.
+          </Typography>
+
+          <Divider sx={{ my: 1.5 }} />
+          <Typography variant="subtitle2" color="primary" gutterBottom>Частота (Гц)</Typography>
+          <Typography variant="body2" paragraph>
+            Сколько замеров в секунду снимает прибор (1–20 Гц).
+            Прибор автоматически выбирает скорость интеграции:
+            ≥10 Гц → FAST, ≥3 Гц → MED, &lt;3 Гц → SLOW.
+            Больше частота = больше данных, но меньше точность.
           </Typography>
 
           <Divider sx={{ my: 1.5 }} />
           <Typography variant="subtitle2" color="primary" gutterBottom>Источник HV</Typography>
           <Typography variant="body2" paragraph>
-            Встроенный источник высокого напряжения (от -1000 до +1000 В).
-            Подаёт постоянное напряжение на образец для измерения тока утечки или сопротивления изоляции.
-            <b> Будьте осторожны</b> — высокое напряжение подаётся сразу при старте эксперимента.
+            Встроенный источник напряжения ±1000 В.
+            Подаёт HV на образец для измерения тока утечки / сопротивления.
+            <b> Осторожно</b> — подаётся при старте эксперимента.
           </Typography>
 
           <Divider sx={{ my: 1.5 }} />
-          <Typography variant="subtitle2" color="primary" gutterBottom>Скорость измерения</Typography>
-          <Box component="ul" sx={{ mt: 0, pl: 2.5, '& li': { mb: 0.5 } }}>
-            <li><Typography variant="body2"><b>Быстро (FAST)</b> — максимальная скорость, меньшая точность. Для быстрых процессов.</Typography></li>
-            <li><Typography variant="body2"><b>Средне (MED)</b> — баланс скорости и точности. Рекомендуется по умолчанию.</Typography></li>
-            <li><Typography variant="body2"><b>Точно (SLOW)</b> — максимальная точность, медленный опрос. Для стабильных измерений.</Typography></li>
-          </Box>
-
-          <Divider sx={{ my: 1.5 }} />
-          <Typography variant="subtitle2" color="primary" gutterBottom>Авто-диапазон</Typography>
+          <Typography variant="subtitle2" color="primary" gutterBottom>Авто-диапазон / Корр. нуля</Typography>
           <Typography variant="body2" paragraph>
-            Прибор автоматически выбирает оптимальный диапазон измерения.
-            Отключите, если знаете ожидаемый порядок величины — это ускорит измерение.
-          </Typography>
-
-          <Divider sx={{ my: 1.5 }} />
-          <Typography variant="subtitle2" color="primary" gutterBottom>Коррекция нуля</Typography>
-          <Typography variant="body2" paragraph>
-            Компенсация смещения нуля прибора. Рекомендуется оставить включённой
-            для точных измерений малых токов и зарядов.
+            <b>Авто-диапазон</b> — прибор сам выбирает масштаб. Отключите для ускорения.
+            <br />
+            <b>Корр. нуля</b> — компенсация смещения. Рекомендуется для малых токов.
           </Typography>
 
           <Divider sx={{ my: 1.5 }} />
           <Typography variant="subtitle2" color="primary" gutterBottom>Камера</Typography>
           <Typography variant="body2" paragraph>
-            При запуске эксперимента автоматически начинается запись видео с активных камер.
-            Видео сохраняется в хранилище и доступно на вкладке статистики.
+            Запись видео стартует автоматически с активных камер.
+            Видео доступно в деталях запуска.
           </Typography>
         </DialogContent>
         <DialogActions>

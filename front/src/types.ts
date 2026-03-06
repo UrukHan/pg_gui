@@ -53,7 +53,7 @@ export interface InstrumentSettings {
   source_volt: number;
   auto_range: boolean;
   range: string;
-  speed: 'SLOW' | 'MED' | 'FAST';
+  frequency: number;
   zero_correct: boolean;
 }
 

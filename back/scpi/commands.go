@@ -12,8 +12,19 @@ type InstrumentSettings struct {
 	SourceVolt  float64 `json:"source_volt"`  // HV source voltage (-1000..+1000)
 	AutoRange   bool    `json:"auto_range"`   // auto range enable
 	Range       string  `json:"range"`        // manual range value (if auto off)
-	Speed       string  `json:"speed"`        // SLOW, MED, FAST
+	Frequency   float64 `json:"frequency"`    // polling frequency in Hz (1-20)
 	ZeroCorrect bool    `json:"zero_correct"` // run zero correction before start
+}
+
+// FrequencyToSpeed maps polling frequency to SCPI integration speed
+func FrequencyToSpeed(hz float64) string {
+	if hz >= 10 {
+		return "FAST"
+	}
+	if hz >= 3 {
+		return "MED"
+	}
+	return "SLOW"
 }
 
 // DefaultSettings returns safe sensible defaults for TH2690
@@ -24,7 +35,7 @@ func DefaultSettings() InstrumentSettings {
 		SourceVolt:  0,
 		AutoRange:   true,
 		Range:       "",
-		Speed:       "MED",
+		Frequency:   5,
 		ZeroCorrect: true,
 	}
 }
@@ -59,15 +70,9 @@ func buildSettingsCommands(s InstrumentSettings) []string {
 		cmds = append(cmds, "FUNC:CURR")
 	}
 
-	// 3. Measurement speed (integration time)
-	switch s.Speed {
-	case "SLOW":
-		cmds = append(cmds, "SPEED:SLOW")
-	case "FAST":
-		cmds = append(cmds, "SPEED:FAST")
-	default:
-		cmds = append(cmds, "SPEED:MED")
-	}
+	// 3. Measurement speed (derived from frequency)
+	speed := FrequencyToSpeed(s.Frequency)
+	cmds = append(cmds, "SPEED:"+speed)
 
 	// 4. Range
 	if s.AutoRange {
@@ -93,6 +98,18 @@ func buildSettingsCommands(s InstrumentSettings) []string {
 	}
 
 	return cmds
+}
+
+// PollingInterval returns the duration between polls for the given settings
+func (s InstrumentSettings) PollingInterval() time.Duration {
+	hz := s.Frequency
+	if hz <= 0 {
+		hz = 5
+	}
+	if hz > 20 {
+		hz = 20
+	}
+	return time.Duration(1000.0/hz) * time.Millisecond
 }
 
 // ReadSettings queries current instrument state (best-effort)

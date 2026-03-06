@@ -126,7 +126,7 @@ export const startExperiment = (data: {
   name: string;
   instrument_ids: string;
   notes: string;
-  settings?: InstrumentSettings;
+  settings?: Record<string, InstrumentSettings>;
 }) => API.post<{ experiment: Experiment }>("/experiments/start", data);
 
 export const stopExperiment = (id: number) =>

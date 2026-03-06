@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -80,10 +81,10 @@ func PingInstrument(c *gin.Context) {
 // --- Start / Stop experiment ---
 
 type StartExperimentRequest struct {
-	Name          string                   `json:"name" binding:"required"`
-	InstrumentIDs string                   `json:"instrument_ids" binding:"required"` // comma-separated
-	Notes         string                   `json:"notes"`
-	Settings      *scpi.InstrumentSettings `json:"settings"`
+	Name          string                              `json:"name" binding:"required"`
+	InstrumentIDs string                              `json:"instrument_ids" binding:"required"` // comma-separated
+	Notes         string                              `json:"notes"`
+	Settings      map[string]*scpi.InstrumentSettings `json:"settings"` // key = instrument ID
 }
 
 func StartExperiment(c *gin.Context) {
@@ -116,14 +117,21 @@ func StartExperiment(c *gin.Context) {
 		instruments = append(instruments, inst)
 	}
 
-	// Apply instrument settings (or defaults)
-	settings := scpi.DefaultSettings()
-	if req.Settings != nil {
-		settings = *req.Settings
-	}
+	// Apply per-instrument settings (or defaults)
+	var maxFreq float64 = 5
 	for _, inst := range instruments {
+		idStr := strconv.Itoa(int(inst.ID))
+		settings := scpi.DefaultSettings()
+		if req.Settings != nil {
+			if s, ok := req.Settings[idStr]; ok && s != nil {
+				settings = *s
+			}
+		}
+		if settings.Frequency > maxFreq {
+			maxFreq = settings.Frequency
+		}
 		if err := scpi.ApplySettings(inst.Host, inst.Port, settings); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("failed to configure instrument %d (%s): %v", inst.ID, inst.Name, err)})
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("failed to configure %s: %v", inst.Name, err)})
 			return
 		}
 	}
@@ -131,10 +139,22 @@ func StartExperiment(c *gin.Context) {
 	// Send FUNC:RUN to all instruments
 	for _, inst := range instruments {
 		if err := scpi.Run(inst.Host, inst.Port); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("failed to start instrument %d (%s): %v", inst.ID, inst.Name, err)})
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("failed to start %s: %v", inst.Name, err)})
 			return
 		}
 	}
+
+	// Serialize settings to JSON for storage
+	settingsJSON := "{}"
+	if req.Settings != nil {
+		if b, err := json.Marshal(req.Settings); err == nil {
+			settingsJSON = string(b)
+		}
+	}
+
+	// Use highest frequency from all instruments
+	pollingSettings := scpi.DefaultSettings()
+	pollingSettings.Frequency = maxFreq
 
 	now := time.Now()
 	exp := models.Experiment{
@@ -144,6 +164,7 @@ func StartExperiment(c *gin.Context) {
 		StartTime:     &now,
 		InstrumentIDs: req.InstrumentIDs,
 		Notes:         req.Notes,
+		SettingsJSON:  settingsJSON,
 	}
 
 	if err := database.DB.Create(&exp).Error; err != nil {
@@ -151,8 +172,8 @@ func StartExperiment(c *gin.Context) {
 		return
 	}
 
-	// Start polling goroutine (5 Hz)
-	scpi.DefaultRunner.Start(&exp, instruments, 200*time.Millisecond)
+	// Start polling goroutine at max frequency
+	scpi.DefaultRunner.Start(&exp, instruments, pollingSettings.PollingInterval())
 
 	// Start video recording if cameras available
 	recorder.Default.Start(exp.ID)

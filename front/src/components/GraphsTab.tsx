@@ -16,8 +16,8 @@ import {
 } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import { Line } from 'react-chartjs-2';
-import { getExperimentData, listExperiments, getExperimentVideoUrl } from '@/api';
-import type { Experiment, Measurement } from '@/types';
+import { getExperimentData, listExperiments, getExperimentVideoUrl, listInstruments } from '@/api';
+import type { Experiment, Measurement, Instrument } from '@/types';
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement,
@@ -38,6 +38,9 @@ const PARAMS = [
   { key: 'source', label: 'Источник', short: 'Src', color: '#795548' },
   { key: 'math_value', label: 'Math', short: 'Math', color: '#607d8b' },
 ] as const;
+
+const INST_DASH = [[], [6, 3], [2, 2], [8, 4, 2, 4]] as number[][];
+const INST_COLORS = ['#1976d2', '#d32f2f', '#388e3c', '#f57c00', '#7b1fa2'];
 
 type ParamKey = typeof PARAMS[number]['key'];
 
@@ -78,6 +81,8 @@ export default function GraphsTab({ experimentId }: Props) {
   const [activeParams, setActiveParams] = useState<ParamKey[]>(['voltage', 'current']);
   const [chartMode, setChartMode] = useState<'combined' | 'separate'>('combined');
   const [viewMode, setViewMode] = useState<'chart' | 'table' | 'video'>('chart');
+  const [instrumentsMap, setInstrumentsMap] = useState<Record<number, Instrument>>({});
+  const [activeInstruments, setActiveInstruments] = useState<number[]>([]);
 
   // Time range (ms offsets from timeMin)
   const [timeMin, setTimeMin] = useState<string | null>(null);
@@ -98,6 +103,11 @@ export default function GraphsTab({ experimentId }: Props) {
 
   useEffect(() => {
     listExperiments().then((res) => setExperiments(res.data)).catch(() => {});
+    listInstruments().then((res) => {
+      const map: Record<number, Instrument> = {};
+      res.data.forEach((inst) => { map[inst.id] = inst; });
+      setInstrumentsMap(map);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -115,15 +125,26 @@ export default function GraphsTab({ experimentId }: Props) {
     getExperimentData(selectedExpId, { per_page: 2000 })
       .then((res) => {
         setExperiment(res.data.experiment);
-        setMeasurements(res.data.measurements || []);
+        const meas = res.data.measurements || [];
+        setMeasurements(meas);
         setTotal(res.data.total);
         setFilteredTotal(res.data.filtered_total);
         setTimeMin(res.data.time_min);
         setTimeMax(res.data.time_max);
+        // Auto-detect instruments in data
+        const ids = [...new Set(meas.map((m) => m.instrument_id))];
+        setActiveInstruments(ids);
       })
       .catch((e) => setError(e.response?.data?.error || 'Ошибка загрузки данных'))
       .finally(() => setLoading(false));
   }, [selectedExpId]);
+
+  // Unique instrument IDs in current data
+  const instrumentIds = useMemo(() => {
+    return [...new Set(measurements.map((m) => m.instrument_id))].sort();
+  }, [measurements]);
+
+  const instName = (id: number) => instrumentsMap[id]?.model || instrumentsMap[id]?.name || `#${id}`;
 
   // Measurement frequency (Hz)
   const measHz = useMemo(() => {
@@ -185,15 +206,6 @@ export default function GraphsTab({ experimentId }: Props) {
     );
   };
 
-  const labels = useMemo(
-    () => measurements.map((m) => {
-      const d = new Date(m.recorded_at);
-      return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        + '.' + String(d.getMilliseconds()).padStart(3, '0');
-    }),
-    [measurements]
-  );
-
   const fmtVal = (v: number) => {
     if (Math.abs(v) >= 999) return '—';
     if (v === 0) return '0';
@@ -201,23 +213,74 @@ export default function GraphsTab({ experimentId }: Props) {
     return v.toFixed(4).replace(/\.?0+$/, '');
   };
 
-  const makeDatasets = (params: ParamKey[]) =>
-    params.map((key) => {
-      const param = PARAMS.find((p) => p.key === key)!;
-      return {
-        label: param.label,
-        data: measurements.map((m) => {
-          const v = m[key] as number;
-          return Math.abs(v) >= 999 ? null : v;
-        }),
-        borderColor: param.color,
-        backgroundColor: param.color + '33',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        tension: 0.3,
-        spanGaps: true,
-      };
+  // Build datasets grouped by instrument
+  const makeDatasets = (params: ParamKey[]) => {
+    const filteredInstIds = instrumentIds.filter((id) => activeInstruments.includes(id));
+    const multiInst = filteredInstIds.length > 1;
+
+    // For single instrument: use param colors. For multi: use instrument colors + param label
+    if (!multiInst) {
+      const instMeas = filteredInstIds.length === 1
+        ? measurements.filter((m) => m.instrument_id === filteredInstIds[0])
+        : measurements;
+      return params.map((key) => {
+        const param = PARAMS.find((p) => p.key === key)!;
+        return {
+          label: param.label,
+          data: instMeas.map((m) => {
+            const v = m[key] as number;
+            return Math.abs(v) >= 999 ? null : v;
+          }),
+          borderColor: param.color,
+          backgroundColor: param.color + '33',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+          spanGaps: true,
+        };
+      });
+    }
+
+    // Multi-instrument: one dataset per instrument × param
+    // Use first instrument's time as reference axis
+    const datasets: any[] = [];
+    filteredInstIds.forEach((instId, instIdx) => {
+      const instMeas = measurements.filter((m) => m.instrument_id === instId);
+      const name = instName(instId);
+      params.forEach((key) => {
+        const param = PARAMS.find((p) => p.key === key)!;
+        const color = INST_COLORS[instIdx % INST_COLORS.length];
+        datasets.push({
+          label: `${name}: ${param.short}`,
+          data: instMeas.map((m) => {
+            const v = m[key] as number;
+            return Math.abs(v) >= 999 ? null : v;
+          }),
+          borderColor: params.length === 1 ? color : param.color,
+          backgroundColor: (params.length === 1 ? color : param.color) + '33',
+          borderWidth: 1.5,
+          borderDash: INST_DASH[instIdx % INST_DASH.length],
+          pointRadius: 0,
+          tension: 0.3,
+          spanGaps: true,
+        });
+      });
     });
+    return datasets;
+  };
+
+  // Labels: use first active instrument's timestamps
+  const chartLabels = useMemo(() => {
+    const filteredInstIds = instrumentIds.filter((id) => activeInstruments.includes(id));
+    const refMeas = filteredInstIds.length > 1
+      ? measurements.filter((m) => m.instrument_id === filteredInstIds[0])
+      : measurements;
+    return refMeas.map((m) => {
+      const d = new Date(m.recorded_at);
+      return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        + '.' + String(d.getMilliseconds()).padStart(3, '0');
+    });
+  }, [measurements, instrumentIds, activeInstruments]);
 
   const chartOptions = (title: string) => ({
     responsive: true,
@@ -298,6 +361,26 @@ export default function GraphsTab({ experimentId }: Props) {
         <>
           {/* Controls bar: params + time range + step */}
           <Paper sx={{ p: 1, mb: 1 }}>
+            {/* Instrument chips (if multiple) */}
+            {instrumentIds.length > 1 && (
+              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center', mb: 0.5 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>Приборы:</Typography>
+                {instrumentIds.map((id, idx) => (
+                  <Chip
+                    key={id}
+                    label={instName(id)}
+                    onClick={() => setActiveInstruments((prev) =>
+                      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+                    )}
+                    color={activeInstruments.includes(id) ? 'primary' : 'default'}
+                    variant={activeInstruments.includes(id) ? 'filled' : 'outlined'}
+                    size="small"
+                    sx={{ borderColor: INST_COLORS[idx % INST_COLORS.length] }}
+                  />
+                ))}
+              </Box>
+            )}
+
             {/* Parameter chips */}
             <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center', mb: 1 }}>
               <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>Параметры:</Typography>
@@ -386,7 +469,7 @@ export default function GraphsTab({ experimentId }: Props) {
 
               {chartMode === 'combined' ? (
                 <Paper sx={{ p: 1, height: { xs: 300, md: 450 } }}>
-                  <Line data={{ labels, datasets: makeDatasets(activeParams) }} options={chartOptions('')} />
+                  <Line data={{ labels: chartLabels, datasets: makeDatasets(activeParams) }} options={chartOptions('')} />
                 </Paper>
               ) : (
                 <Stack spacing={1.5}>
@@ -394,7 +477,7 @@ export default function GraphsTab({ experimentId }: Props) {
                     const param = PARAMS.find((p) => p.key === key)!;
                     return (
                       <Paper key={key} sx={{ p: 1, height: { xs: 220, md: 300 } }}>
-                        <Line data={{ labels, datasets: makeDatasets([key]) }} options={chartOptions(param.label)} />
+                        <Line data={{ labels: chartLabels, datasets: makeDatasets([key]) }} options={chartOptions(param.label)} />
                       </Paper>
                     );
                   })}
@@ -410,6 +493,9 @@ export default function GraphsTab({ experimentId }: Props) {
                   <TableHead>
                     <TableRow>
                       <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>#</TableCell>
+                      {instrumentIds.length > 1 && (
+                        <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>Прибор</TableCell>
+                      )}
                       <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>Время</TableCell>
                       {visibleParams.map((p) => (
                         <TableCell key={p.key} sx={{ fontWeight: 600, whiteSpace: 'nowrap', color: p.color }}>
@@ -419,9 +505,14 @@ export default function GraphsTab({ experimentId }: Props) {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {measurements.map((m, i) => (
+                    {measurements.filter((m) => activeInstruments.includes(m.instrument_id)).map((m, i) => (
                       <TableRow key={m.id} hover>
                         <TableCell>{(page - 1) * perPage + i + 1}</TableCell>
+                        {instrumentIds.length > 1 && (
+                          <TableCell sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+                            {instName(m.instrument_id)}
+                          </TableCell>
+                        )}
                         <TableCell sx={{ whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: '0.8rem' }}>
                           {new Date(m.recorded_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                           <Typography component="span" sx={{ fontSize: '0.65rem', color: 'text.disabled', ml: 0.3 }}>

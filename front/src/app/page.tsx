@@ -1,26 +1,21 @@
 'use client';
 
-import { useState, ComponentType } from 'react';
+import { useState } from 'react';
 import {
   Box, Paper, TextField, Button, Typography, CircularProgress,
   BottomNavigation, BottomNavigationAction, AppBar, Toolbar, IconButton, Menu, MenuItem,
   useMediaQuery, useTheme,
 } from '@mui/material';
 import ScienceIcon from '@mui/icons-material/Science';
-import TableChartIcon from '@mui/icons-material/TableChart';
-import BarChartIcon from '@mui/icons-material/BarChart';
+import ListAltIcon from '@mui/icons-material/ListAlt';
+import PeopleIcon from '@mui/icons-material/People';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PersonIcon from '@mui/icons-material/Person';
-import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
 import InstrumentsTab from '@/components/InstrumentsTab';
-import TablesTab from '@/components/TablesTab';
-
-const GraphsTab = dynamic<{ experimentId: number | null }>(
-  () => import('@/components/GraphsTab') as Promise<{ default: ComponentType<{ experimentId: number | null }> }>,
-  { ssr: false }
-);
+import ExperimentsTab from '@/components/ExperimentsTab';
+import UsersTab from '@/components/UsersTab';
 
 export default function Home() {
   const { user, loading, login, logout } = useAuth();
@@ -29,8 +24,6 @@ export default function Home() {
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  // For graphs tab: which experiment to show
-  const [graphExperimentId, setGraphExperimentId] = useState<number | null>(null);
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -45,11 +38,6 @@ export default function Home() {
     } finally {
       setLoginLoading(false);
     }
-  };
-
-  const openGraphs = (experimentId: number) => {
-    setGraphExperimentId(experimentId);
-    setTab(2);
   };
 
   if (loading) {
@@ -111,15 +99,15 @@ export default function Home() {
   // --- Main app ---
   const tabs = [
     { label: 'Приборы', icon: <ScienceIcon /> },
-    { label: 'Таблицы', icon: <TableChartIcon /> },
-    { label: 'Статистика', icon: <BarChartIcon /> },
+    { label: 'Запуски', icon: <ListAltIcon /> },
+    { label: 'Пользователи', icon: <PeopleIcon /> },
   ];
 
   const tabContent = (
     <Box sx={{ flexGrow: 1, overflow: 'auto', p: { xs: 1, md: 2 } }}>
       {tab === 0 && <InstrumentsTab />}
-      {tab === 1 && <TablesTab onOpenGraphs={openGraphs} />}
-      {tab === 2 && <GraphsTab experimentId={graphExperimentId} />}
+      {tab === 1 && <ExperimentsTab />}
+      {tab === 2 && <UsersTab />}
     </Box>
   );
 
