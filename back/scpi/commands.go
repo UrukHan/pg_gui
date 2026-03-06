@@ -2,6 +2,7 @@ package scpi
 
 import (
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -43,12 +44,16 @@ func DefaultSettings() InstrumentSettings {
 // ApplySettings sends configuration SCPI commands to the instrument
 func ApplySettings(host string, port int, s InstrumentSettings) error {
 	cmds := buildSettingsCommands(s)
+	log.Printf("[SCPI] ApplySettings %s:%d commands=%v", host, port, cmds)
 	for _, cmd := range cmds {
-		if _, err := Send(host, port, cmd, 2*time.Second); err != nil {
+		resp, err := Send(host, port, cmd, 2*time.Second)
+		if err != nil {
+			log.Printf("[SCPI] ApplySettings %s:%d cmd=%q ERROR: %v", host, port, cmd, err)
 			return fmt.Errorf("command %q failed: %w", cmd, err)
 		}
+		log.Printf("[SCPI] ApplySettings %s:%d cmd=%q resp=%q", host, port, cmd, resp)
 		// Small delay between commands for instrument to process
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 	return nil
 }

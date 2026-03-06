@@ -285,23 +285,22 @@ export default function InstrumentsTab() {
                   })}
                 </ToggleButtonGroup>
 
-                <Stack spacing={1.5}>
-                  {/* Measurement mode */}
-                  <Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-                      Режим измерения
-                    </Typography>
-                    <ToggleButtonGroup value={s.function} exclusive size="small" fullWidth
-                      onChange={(_, v) => v && upd({ function: v })}
-                      sx={{ '& .MuiToggleButton-root': { flex: 1, fontSize: '0.8rem', py: 0.5 } }}>
-                      <ToggleButton value="CURR">Ток (A)</ToggleButton>
-                      <ToggleButton value="RES">Сопр. (R)</ToggleButton>
-                      <ToggleButton value="CHAR">Заряд (Q)</ToggleButton>
-                    </ToggleButtonGroup>
-                  </Box>
-
-                  {/* Frequency + Auto-range + Zero correct + Source HV — one row */}
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} flexWrap="wrap">
+                {/* Two equal columns: Left = measurement, Right = Source HV */}
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+                  {/* LEFT COLUMN: Mode + Freq + AutoRange + Zero */}
+                  <Stack spacing={1.5}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                        Режим измерения
+                      </Typography>
+                      <ToggleButtonGroup value={s.function} exclusive size="small" fullWidth
+                        onChange={(_, v) => v && upd({ function: v })}
+                        sx={{ '& .MuiToggleButton-root': { flex: 1, fontSize: '0.8rem', py: 0.5 } }}>
+                        <ToggleButton value="CURR">Ток (A)</ToggleButton>
+                        <ToggleButton value="RES">Сопр. (R)</ToggleButton>
+                        <ToggleButton value="CHAR">Заряд (Q)</ToggleButton>
+                      </ToggleButtonGroup>
+                    </Box>
                     <TextField label="Частота, Гц" type="number" size="small"
                       value={s.frequency}
                       onChange={(e) => {
@@ -310,7 +309,7 @@ export default function InstrumentsTab() {
                         upd({ frequency: v });
                       }}
                       inputProps={{ min: 1, max: 20, step: 1 }}
-                      sx={{ width: { xs: '100%', sm: 130 } }}
+                      sx={{ width: 130 }}
                       helperText={`${s.frequency} зам./сек`}
                     />
                     <FormControlLabel
@@ -323,31 +322,30 @@ export default function InstrumentsTab() {
                         onChange={(e) => upd({ zero_correct: e.target.checked })} />}
                       label={<Typography variant="body2">Корр. нуля</Typography>}
                     />
+                  </Stack>
+
+                  {/* RIGHT COLUMN: Source HV — always visible, disabled when off */}
+                  <Stack spacing={1.5}>
                     <FormControlLabel
                       control={<Switch checked={s.source_on} size="small"
                         onChange={(e) => upd({ source_on: e.target.checked })} />}
-                      label={<Typography variant="body2">Источник HV</Typography>}
-                      sx={{ mr: 0 }}
+                      label={<Typography variant="body2" fontWeight={600}>Источник HV</Typography>}
                     />
-                    {s.source_on && (
-                      <TextField label="В" type="number" size="small"
-                        value={s.source_volt}
-                        onChange={(e) => upd({ source_volt: Number(e.target.value) })}
-                        inputProps={{ min: -1000, max: 1000, step: 1 }}
-                        sx={{ width: 120 }}
-                      />
-                    )}
-                  </Stack>
-                  {/* HV Slider — below the row */}
-                  {s.source_on && (
+                    <TextField label="Напряжение, В" type="number" size="small"
+                      value={s.source_volt}
+                      onChange={(e) => upd({ source_volt: Number(e.target.value) })}
+                      inputProps={{ min: -1000, max: 1000, step: 1 }}
+                      disabled={!s.source_on}
+                      fullWidth
+                    />
                     <Slider value={s.source_volt} min={-1000} max={1000} step={1}
                       onChange={(_, v) => upd({ source_volt: v as number })}
                       valueLabelDisplay="auto" size="small"
+                      disabled={!s.source_on}
                       marks={[{ value: -1000, label: '-1kV' }, { value: 0, label: '0' }, { value: 1000, label: '1kV' }]}
-                      sx={{ mt: 0.5, width: '80%', mx: 'auto' }}
                     />
-                  )}
-                </Stack>
+                  </Stack>
+                </Box>
               </Paper>
             );
           })()}
