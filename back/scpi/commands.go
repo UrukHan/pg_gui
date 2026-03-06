@@ -3,6 +3,7 @@ package scpi
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -42,18 +43,21 @@ func DefaultSettings() InstrumentSettings {
 }
 
 // ApplySettings sends configuration SCPI commands to the instrument
+// All commands are sent on a single TCP connection (TH2690 requirement)
 func ApplySettings(host string, port int, s InstrumentSettings) error {
 	cmds := buildSettingsCommands(s)
 	log.Printf("[SCPI] ApplySettings %s:%d commands=%v", host, port, cmds)
+	results, err := SendBatch(host, port, cmds, 2*time.Second)
+	if err != nil {
+		log.Printf("[SCPI] ApplySettings %s:%d batch ERROR: %v", host, port, err)
+		return err
+	}
 	for _, cmd := range cmds {
-		resp, err := Send(host, port, cmd, 2*time.Second)
-		if err != nil {
-			log.Printf("[SCPI] ApplySettings %s:%d cmd=%q ERROR: %v", host, port, cmd, err)
-			return fmt.Errorf("command %q failed: %w", cmd, err)
-		}
+		resp := results[cmd]
 		log.Printf("[SCPI] ApplySettings %s:%d cmd=%q resp=%q", host, port, cmd, resp)
-		// Small delay between commands for instrument to process
-		time.Sleep(100 * time.Millisecond)
+		if strings.HasPrefix(resp, "Error") {
+			log.Printf("[SCPI] ApplySettings %s:%d WARNING: cmd %q returned %q", host, port, cmd, resp)
+		}
 	}
 	return nil
 }

@@ -5,7 +5,7 @@ import {
   Box, Paper, Typography, Button, TextField, Chip, Switch, Collapse,
   Dialog, DialogTitle, DialogContent, DialogActions, Checkbox, FormControlLabel,
   Alert, CircularProgress, Divider, Card, CardContent, Stack, IconButton,
-  ToggleButton, ToggleButtonGroup, Slider,
+  ToggleButton, ToggleButtonGroup, Slider, Snackbar,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
@@ -206,8 +206,14 @@ export default function InstrumentsTab() {
 
   return (
     <Box>
-      {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError('')}>{error}</Alert>}
-      {success && <Alert severity="success" sx={{ mb: 1 }} onClose={() => setSuccess('')}>{success}</Alert>}
+      <Snackbar open={!!error} autoHideDuration={5000} onClose={() => setError('')}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert severity="error" variant="filled" onClose={() => setError('')}>{error}</Alert>
+      </Snackbar>
+      <Snackbar open={!!success} autoHideDuration={5000} onClose={() => setSuccess('')}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert severity="success" variant="filled" onClose={() => setSuccess('')}>{success}</Alert>
+      </Snackbar>
 
       {/* Running experiment banner */}
       {runningExp && (
@@ -294,7 +300,7 @@ export default function InstrumentsTab() {
 
                 {/* Two equal columns: Left = measurement, Right = Source HV */}
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-                  {/* LEFT COLUMN: Mode + Freq + AutoRange + Zero */}
+                  {/* LEFT COLUMN: Mode + Freq/AutoRange/Zero in one row */}
                   <Stack spacing={1.5}>
                     <Box>
                       <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
@@ -308,27 +314,28 @@ export default function InstrumentsTab() {
                         <ToggleButton value="CHAR">Заряд (Q)</ToggleButton>
                       </ToggleButtonGroup>
                     </Box>
-                    <TextField label="Частота, Гц" type="number" size="small"
-                      value={s.frequency}
-                      onChange={(e) => {
-                        let v = Number(e.target.value);
-                        if (v < 1) v = 1; if (v > 20) v = 20;
-                        upd({ frequency: v });
-                      }}
-                      inputProps={{ min: 1, max: 20, step: 1 }}
-                      sx={{ width: 130 }}
-                      helperText={`${s.frequency} зам./сек`}
-                    />
-                    <FormControlLabel
-                      control={<Switch checked={s.auto_range} size="small"
-                        onChange={(e) => upd({ auto_range: e.target.checked })} />}
-                      label={<Typography variant="body2">Авто-диапазон</Typography>}
-                    />
-                    <FormControlLabel
-                      control={<Checkbox checked={s.zero_correct} size="small"
-                        onChange={(e) => upd({ zero_correct: e.target.checked })} />}
-                      label={<Typography variant="body2">Корр. нуля</Typography>}
-                    />
+                    <Stack direction="row" alignItems="center" spacing={1.5} flexWrap="wrap">
+                      <TextField label="Частота, Гц" type="number" size="small"
+                        value={s.frequency}
+                        onChange={(e) => {
+                          let v = Number(e.target.value);
+                          if (v < 1) v = 1; if (v > 20) v = 20;
+                          upd({ frequency: v });
+                        }}
+                        inputProps={{ min: 1, max: 20, step: 1 }}
+                        sx={{ width: 110 }}
+                      />
+                      <FormControlLabel sx={{ m: 0 }}
+                        control={<Switch checked={s.auto_range} size="small"
+                          onChange={(e) => upd({ auto_range: e.target.checked })} />}
+                        label={<Typography variant="body2">Авто-диапазон</Typography>}
+                      />
+                      <FormControlLabel sx={{ m: 0 }}
+                        control={<Checkbox checked={s.zero_correct} size="small"
+                          onChange={(e) => upd({ zero_correct: e.target.checked })} />}
+                        label={<Typography variant="body2">Корр. нуля</Typography>}
+                      />
+                    </Stack>
                   </Stack>
 
                   {/* RIGHT COLUMN: Source HV — always visible, disabled when off */}

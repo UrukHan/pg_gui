@@ -54,6 +54,44 @@ func Send(host string, port int, cmd string, timeout time.Duration) (string, err
 	return strings.TrimSpace(string(buf[:n])), nil
 }
 
+// SendBatch sends multiple SCPI commands on a single TCP connection.
+// TH2690 requires all settings commands on the same connection session.
+// Returns a map of command -> response for each command.
+func SendBatch(host string, port int, cmds []string, perCmdTimeout time.Duration) (map[string]string, error) {
+	if perCmdTimeout == 0 {
+		perCmdTimeout = defaultTimeout
+	}
+	addr := fmt.Sprintf("%s:%d", host, port)
+	conn, err := net.DialTimeout("tcp", addr, perCmdTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("connect %s: %w", addr, err)
+	}
+	defer conn.Close()
+
+	results := make(map[string]string, len(cmds))
+	buf := make([]byte, 4096)
+
+	for _, cmd := range cmds {
+		conn.SetDeadline(time.Now().Add(perCmdTimeout))
+		_, err = conn.Write([]byte(cmd + "\r\n"))
+		if err != nil {
+			return results, fmt.Errorf("write %q: %w", cmd, err)
+		}
+
+		n, err := conn.Read(buf)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				results[cmd] = ""
+				continue
+			}
+			return results, fmt.Errorf("read %q: %w", cmd, err)
+		}
+		results[cmd] = strings.TrimSpace(string(buf[:n]))
+		time.Sleep(50 * time.Millisecond)
+	}
+	return results, nil
+}
+
 // IDNInfo holds parsed *IDN? data
 type IDNInfo struct {
 	Model    string

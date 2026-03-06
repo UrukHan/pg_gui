@@ -126,7 +126,8 @@ func (m *Manager) Start(experimentID uint) {
 		"-rtsp_transport", "tcp",
 		"-timeout", "5000000", // 5s connection timeout (microseconds)
 		"-i", cam.RTSPURL,
-		"-c", "copy",
+		"-c:v", "copy",
+		"-an", // strip audio (pcm_mulaw not supported in MP4)
 		"-t", "86400",
 		"-movflags", "+faststart",
 		"-y",
