@@ -25,12 +25,10 @@ func ListInstruments(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Check online status for active instruments
+	// Check online status for all instruments
 	for i := range instruments {
-		if instruments[i].Active {
-			_, err := scpi.Identify(instruments[i].Host, instruments[i].Port)
-			instruments[i].Online = err == nil
-		}
+		_, err := scpi.Identify(instruments[i].Host, instruments[i].Port)
+		instruments[i].Online = err == nil
 	}
 	c.JSON(http.StatusOK, instruments)
 }

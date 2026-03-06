@@ -238,26 +238,28 @@ export default function InstrumentsTab() {
           {/* Instrument selection */}
           <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Приборы:</Typography>
           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1.5 }}>
-            {instruments.filter((i) => i.active && i.online).map((inst) => (
+            {instruments.filter((i) => i.active).map((inst) => (
               <Chip
                 key={inst.id}
-                label={inst.model || inst.name}
-                color={selectedInstruments.includes(inst.id) ? 'primary' : 'default'}
+                label={`${inst.model || inst.name}${inst.online ? '' : ' (офлайн)'}`}
+                color={selectedInstruments.includes(inst.id) ? (inst.online ? 'primary' : 'warning') : 'default'}
                 onClick={() => toggleInstrumentSelection(inst.id)}
                 variant={selectedInstruments.includes(inst.id) ? 'filled' : 'outlined'}
                 size="small"
+                disabled={!inst.online}
               />
             ))}
-            {instruments.filter((i) => i.active && i.online).length === 0 && (
-              <Typography variant="body2" color="text.secondary">Нет доступных приборов</Typography>
+            {instruments.filter((i) => i.active).length === 0 && (
+              <Typography variant="body2" color="text.secondary">Нет активных приборов</Typography>
             )}
           </Box>
 
           {/* Per-instrument settings — always visible */}
           {(() => {
             const onlineInsts = instruments.filter((i) => i.active && i.online);
-            if (onlineInsts.length === 0) return null;
-            const cid = configInstId ?? onlineInsts[0]?.id;
+            const activeInsts = instruments.filter((i) => i.active);
+            if (activeInsts.length === 0) return null;
+            const cid = configInstId ?? onlineInsts[0]?.id ?? activeInsts[0]?.id;
             if (!cid) return null;
             const s = getSettings(cid);
             const upd = (patch: Partial<InstrumentSettings>) => updateSettings(cid, patch);
