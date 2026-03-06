@@ -138,13 +138,17 @@ export default function InstrumentsTab() {
     }
   };
 
-  // Auto-select first online instrument for config
+  // Auto-select online instruments for config and experiment
   useEffect(() => {
     const online = instruments.filter((i) => i.active && i.online);
     if (online.length > 0 && configInstId === null) {
       setConfigInstId(online[0].id);
     }
-  }, [instruments, configInstId]);
+    // Auto-select all online instruments if none selected yet
+    if (selectedInstruments.length === 0 && online.length > 0) {
+      setSelectedInstruments(online.map((i) => i.id));
+    }
+  }, [instruments, configInstId, selectedInstruments.length]);
 
   const toggleInstrumentSelection = (id: number) => {
     setSelectedInstruments((prev) =>
@@ -296,8 +300,8 @@ export default function InstrumentsTab() {
                     </ToggleButtonGroup>
                   </Box>
 
-                  {/* Frequency + Auto-range + Zero correct — one row */}
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
+                  {/* Frequency + Auto-range + Zero correct + Source HV — one row */}
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} flexWrap="wrap">
                     <TextField label="Частота, Гц" type="number" size="small"
                       value={s.frequency}
                       onChange={(e) => {
@@ -319,35 +323,30 @@ export default function InstrumentsTab() {
                         onChange={(e) => upd({ zero_correct: e.target.checked })} />}
                       label={<Typography variant="body2">Корр. нуля</Typography>}
                     />
-                  </Stack>
-
-                  {/* Source HV */}
-                  <Box>
-                    <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-                      <FormControlLabel
-                        control={<Switch checked={s.source_on} size="small"
-                          onChange={(e) => upd({ source_on: e.target.checked })} />}
-                        label={<Typography variant="body2">Источник HV</Typography>}
-                        sx={{ mr: 0 }}
-                      />
-                      {s.source_on && (
-                        <TextField label="В" type="number" size="small"
-                          value={s.source_volt}
-                          onChange={(e) => upd({ source_volt: Number(e.target.value) })}
-                          inputProps={{ min: -1000, max: 1000, step: 1 }}
-                          sx={{ width: 120 }}
-                        />
-                      )}
-                    </Stack>
+                    <FormControlLabel
+                      control={<Switch checked={s.source_on} size="small"
+                        onChange={(e) => upd({ source_on: e.target.checked })} />}
+                      label={<Typography variant="body2">Источник HV</Typography>}
+                      sx={{ mr: 0 }}
+                    />
                     {s.source_on && (
-                      <Slider value={s.source_volt} min={-1000} max={1000} step={1}
-                        onChange={(_, v) => upd({ source_volt: v as number })}
-                        valueLabelDisplay="auto" size="small"
-                        marks={[{ value: -1000, label: '-1kV' }, { value: 0, label: '0' }, { value: 1000, label: '1kV' }]}
-                        sx={{ mt: 0.5, width: '80%', mx: 'auto' }}
+                      <TextField label="В" type="number" size="small"
+                        value={s.source_volt}
+                        onChange={(e) => upd({ source_volt: Number(e.target.value) })}
+                        inputProps={{ min: -1000, max: 1000, step: 1 }}
+                        sx={{ width: 120 }}
                       />
                     )}
-                  </Box>
+                  </Stack>
+                  {/* HV Slider — below the row */}
+                  {s.source_on && (
+                    <Slider value={s.source_volt} min={-1000} max={1000} step={1}
+                      onChange={(_, v) => upd({ source_volt: v as number })}
+                      valueLabelDisplay="auto" size="small"
+                      marks={[{ value: -1000, label: '-1kV' }, { value: 0, label: '0' }, { value: 1000, label: '1kV' }]}
+                      sx={{ mt: 0.5, width: '80%', mx: 'auto' }}
+                    />
+                  )}
                 </Stack>
               </Paper>
             );
