@@ -393,20 +393,19 @@ export default function InstrumentsTab() {
                 </Typography>
               </Box>
               <Chip
-                label={inst.online ? 'Онлайн' : inst.active ? 'Офлайн' : 'Выкл'}
-                color={inst.online ? 'success' : inst.active ? 'error' : 'default'}
+                label={inst.online ? 'Онлайн' : 'Офлайн'}
+                color={inst.online ? 'success' : 'error'}
                 size="small"
                 variant={inst.online ? 'filled' : 'outlined'}
                 sx={{ mx: 1, flexShrink: 0 }}
               />
-              <Switch
-                checked={inst.active}
-                onChange={(e) => { e.stopPropagation(); handleToggle(inst.id); }}
-                onClick={(e) => e.stopPropagation()}
-                size="small"
-                disabled={!inst.online && !inst.active}
-                sx={{ flexShrink: 0 }}
-              />
+              <Box onClick={(e) => e.stopPropagation()} sx={{ flexShrink: 0 }}>
+                <Switch
+                  checked={inst.active}
+                  onChange={() => handleToggle(inst.id)}
+                  size="small"
+                />
+              </Box>
               {expandedId === inst.id ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
             </Box>
             <Collapse in={expandedId === inst.id}>
