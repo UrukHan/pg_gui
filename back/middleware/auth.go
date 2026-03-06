@@ -24,11 +24,11 @@ func init() {
 }
 
 type Claims struct {
-	UserID     uint              `json:"user_id"`
-	Login      string            `json:"login"`
-	Role       models.UserRole   `json:"role"`
-	Permission models.UserPermission `json:"permission"`
-	InstrumentAccess bool        `json:"instrument_access"`
+	UserID           uint                  `json:"user_id"`
+	Login            string                `json:"login"`
+	Role             models.UserRole       `json:"role"`
+	Permission       models.UserPermission `json:"permission"`
+	InstrumentAccess bool                  `json:"instrument_access"`
 	jwt.RegisteredClaims
 }
 
@@ -50,20 +50,25 @@ func GenerateToken(user *models.User) (string, error) {
 
 func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Try Authorization header first, then ?token= query param (for video streaming)
+		tokenStr := ""
 		header := c.GetHeader("Authorization")
-		if header == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
-			return
+		if header != "" {
+			parts := strings.SplitN(header, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenStr = parts[1]
+			}
 		}
-
-		parts := strings.SplitN(header, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid authorization format"})
+		if tokenStr == "" {
+			tokenStr = c.Query("token")
+		}
+		if tokenStr == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization required"})
 			return
 		}
 
 		claims := &Claims{}
-		token, err := jwt.ParseWithClaims(parts[1], claims, func(t *jwt.Token) (interface{}, error) {
+		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
 			return jwtSecret, nil
 		})
 		if err != nil || !token.Valid {

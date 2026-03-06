@@ -2,6 +2,7 @@ import axios from "axios";
 import type {
   User,
   Instrument,
+  Camera,
   Experiment,
   Measurement,
 } from "./types";
@@ -82,6 +83,9 @@ export const toggleInstrument = (id: number) =>
 export const pingInstrument = (id: number) =>
   API.get<{ idn: string; model: string; firmware: string; serial: string }>(`/instruments/${id}/ping`);
 
+// --- Cameras ---
+export const listCameras = () => API.get<Camera[]>("/cameras");
+
 // --- Experiments ---
 export const listExperiments = () => API.get<Experiment[]>("/experiments");
 
@@ -111,5 +115,10 @@ export const stopExperiment = (id: number) =>
 
 export const deleteExperiment = (id: number) =>
   API.delete(`/experiments/${id}`);
+
+export const getExperimentVideoUrl = (id: number): string => {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
+  return `${getBaseURL()}/experiments/${id}/video?token=${token}`;
+};
 
 export default API;

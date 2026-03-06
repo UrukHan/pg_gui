@@ -27,6 +27,7 @@ func Init() {
 	if err := DB.AutoMigrate(
 		&models.User{},
 		&models.Instrument{},
+		&models.Camera{},
 		&models.Experiment{},
 		&models.Measurement{},
 	); err != nil {

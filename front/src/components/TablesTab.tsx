@@ -10,12 +10,13 @@ import {
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import VideocamIcon from '@mui/icons-material/Videocam';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { useAuth } from '@/context/AuthContext';
 import {
   listUsers, createUser, updateUser, deleteUser,
-  listExperiments, deleteExperiment,
+  listExperiments, deleteExperiment, getExperimentVideoUrl,
 } from '@/api';
 import type { User, Experiment, UserPermission } from '@/types';
 
@@ -53,6 +54,7 @@ function ExperimentsSubTab({ onOpenGraphs }: { onOpenGraphs: (id: number) => voi
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -145,6 +147,11 @@ function ExperimentsSubTab({ onOpenGraphs }: { onOpenGraphs: (id: number) => voi
               />
 
               {/* Actions */}
+              {exp.video_path && (
+                <IconButton size="small" title="Видео" onClick={(e) => { e.stopPropagation(); setVideoUrl(getExperimentVideoUrl(exp.id)); }}>
+                  <VideocamIcon fontSize="small" />
+                </IconButton>
+              )}
               <IconButton size="small" title="Статистика" onClick={(e) => { e.stopPropagation(); onOpenGraphs(exp.id); }}>
                 <VisibilityIcon fontSize="small" />
               </IconButton>
@@ -187,6 +194,23 @@ function ExperimentsSubTab({ onOpenGraphs }: { onOpenGraphs: (id: number) => voi
           </Paper>
         )}
       </Stack>
+      {/* Video player dialog */}
+      <Dialog open={!!videoUrl} onClose={() => setVideoUrl(null)} maxWidth="md" fullWidth>
+        <DialogTitle>Видеозапись эксперимента</DialogTitle>
+        <DialogContent sx={{ p: 1 }}>
+          {videoUrl && (
+            <video
+              src={videoUrl}
+              controls
+              autoPlay
+              style={{ width: '100%', maxHeight: '70vh', borderRadius: 4 }}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setVideoUrl(null)}>Закрыть</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

@@ -12,6 +12,7 @@ import (
 	"back/database"
 	"back/middleware"
 	"back/models"
+	"back/recorder"
 	"back/scpi"
 )
 
@@ -140,6 +141,9 @@ func StartExperiment(c *gin.Context) {
 	// Start polling goroutine (5 Hz)
 	scpi.DefaultRunner.Start(&exp, instruments, 200*time.Millisecond)
 
+	// Start video recording if cameras available
+	recorder.Default.Start(exp.ID)
+
 	c.JSON(http.StatusOK, gin.H{"experiment": exp})
 }
 
@@ -179,6 +183,11 @@ func StopExperiment(c *gin.Context) {
 		if database.DB.First(&inst, instID).Error == nil {
 			scpi.Stop(inst.Host, inst.Port)
 		}
+	}
+
+	// Stop video recording and upload
+	if videoPath := recorder.Default.Stop(exp.ID); videoPath != "" {
+		exp.VideoPath = videoPath
 	}
 
 	now := time.Now()

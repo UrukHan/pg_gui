@@ -30,7 +30,12 @@ services:
       DATABASE_DSN: "host=postgres user=ariadna password=ariadna dbname=ariadna port=5432 sslmode=disable"
       ADMIN_LOGIN: "admin"
       ADMIN_PASSWORD: "admin"
-      INSTRUMENTS: "TH2690=192.168.1.150:45454"
+      INSTRUMENTS: "Электрометр TH2690=192.168.1.150:45454"
+      CAMERAS: "DS-H104GA=rtsp://admin:Ariadna25@192.168.1.64:554/Streaming/Channels/101"
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "ariadna"
+      MINIO_SECRET_KEY: "ariadna123"
+      MINIO_BUCKET: "experiments"
     ports:
       - "8080:8080"
     volumes:
@@ -38,6 +43,22 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_started
+
+  minio:
+    image: minio/minio:latest
+    container_name: pg-ariadna-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ariadna
+      MINIO_ROOT_PASSWORD: ariadna123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
 
   frontend:
     build:
@@ -55,3 +76,4 @@ services:
 volumes:
   pgdata:
   uploads:
+  miniodata:

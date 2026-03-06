@@ -35,7 +35,16 @@ export interface Experiment {
   end_time: string | null;
   instrument_ids: string;
   notes: string;
+  video_path: string;
   created_at: string;
+}
+
+export interface Camera {
+  id: number;
+  name: string;
+  rtsp_url: string;
+  active: boolean;
+  online: boolean;
 }
 
 export interface Measurement {

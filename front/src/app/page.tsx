@@ -66,7 +66,7 @@ export default function Home() {
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100dvh', bgcolor: '#1a1a2e' }}>
         <Paper sx={{ p: 4, maxWidth: 400, width: '100%', mx: 2, borderRadius: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
-            <Image src="/images/logo.png" alt="Ariadna" width={220} height={60} style={{ objectFit: 'contain' }} />
+            <Image src="/images/logo_dark.png" alt="Ariadna" width={220} height={60} style={{ objectFit: 'contain' }} />
           </Box>
           <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 3 }}>
             Вход в систему

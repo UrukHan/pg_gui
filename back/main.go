@@ -15,12 +15,16 @@ import (
 	"back/database"
 	"back/middleware"
 	"back/models"
+	"back/recorder"
 	"back/scpi"
+	"back/storage"
 )
 
 func main() {
 	database.Init()
+	storage.Init()
 	syncInstruments()
+	syncCameras()
 
 	r := gin.Default()
 
@@ -61,11 +65,15 @@ func main() {
 		auth.GET("/instruments/:id/ping", controllers.PingInstrument)
 		auth.PUT("/instruments/:id/toggle", controllers.ToggleInstrument)
 
+		// Cameras
+		auth.GET("/cameras", controllers.ListCameras)
+
 		// Experiments
 		auth.GET("/experiments", controllers.ListExperiments)
 		auth.GET("/experiments/:id", controllers.GetExperiment)
 		auth.GET("/experiments/:id/data", controllers.GetExperimentData)
 		auth.GET("/experiments/:id/status", controllers.ExperimentStatusCheck)
+		auth.GET("/experiments/:id/video", controllers.GetExperimentVideo)
 		auth.DELETE("/experiments/:id", controllers.DeleteExperiment)
 
 		// Start / Stop measurement
@@ -143,5 +151,31 @@ func syncInstruments() {
 		} else {
 			log.Printf("Instrument %s (%s:%d) unreachable: %v", inst.Name, inst.Host, inst.Port, err)
 		}
+	}
+}
+
+// syncCameras reads CAMERAS env var and syncs DB + recorder config.
+// Format: "DS-H104GA=rtsp://admin:pass@192.168.1.64:554/Streaming/Channels/101"
+func syncCameras() {
+	raw := os.Getenv("CAMERAS")
+	if raw == "" {
+		return
+	}
+
+	configs := recorder.ParseCameras(raw)
+	recorder.Cameras = configs
+
+	for _, cfg := range configs {
+		var cam models.Camera
+		res := database.DB.Where("rtsp_url = ?", cfg.RTSPURL).First(&cam)
+		if res.Error != nil {
+			cam = models.Camera{Name: cfg.Name, RTSPURL: cfg.RTSPURL, Active: true}
+			database.DB.Create(&cam)
+			log.Printf("Camera added: %s", cfg.Name)
+		} else {
+			cam.Name = cfg.Name
+			database.DB.Save(&cam)
+		}
+		log.Printf("Camera configured: %s (%s)", cfg.Name, cfg.RTSPURL)
 	}
 }
