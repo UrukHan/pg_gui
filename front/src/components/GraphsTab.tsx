@@ -41,13 +41,17 @@ const PARAMS = [
 
 type ParamKey = typeof PARAMS[number]['key'];
 
-const STEP_OPTIONS = [
-  { value: 1, label: 'Все' },
-  { value: 5, label: 'x5' },
-  { value: 10, label: 'x10' },
-  { value: 25, label: 'x25' },
-  { value: 50, label: 'x50' },
-  { value: 100, label: 'x100' },
+// Time-based interval options (seconds)
+const INTERVAL_OPTIONS = [
+  { sec: 0, label: 'Все' },
+  { sec: 0.2, label: '0.2с' },
+  { sec: 0.5, label: '0.5с' },
+  { sec: 1, label: '1с' },
+  { sec: 2, label: '2с' },
+  { sec: 5, label: '5с' },
+  { sec: 10, label: '10с' },
+  { sec: 30, label: '30с' },
+  { sec: 60, label: '1мин' },
 ];
 
 const PER_PAGE_OPTIONS = [100, 250, 500, 1000, 2000];
@@ -85,7 +89,7 @@ export default function GraphsTab({ experimentId }: Props) {
   }, [timeMin, timeMax]);
 
   // Step & pagination
-  const [step, setStep] = useState(1);
+  const [intervalSec, setIntervalSec] = useState(0); // 0 = all points
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(500);
   const [total, setTotal] = useState(0);
@@ -106,7 +110,7 @@ export default function GraphsTab({ experimentId }: Props) {
     setLoading(true);
     setError('');
     setPage(1);
-    setStep(1);
+    setIntervalSec(0);
     setTimeRange([0, 100]);
     getExperimentData(selectedExpId, { per_page: 2000 })
       .then((res) => {
@@ -120,6 +124,24 @@ export default function GraphsTab({ experimentId }: Props) {
       .catch((e) => setError(e.response?.data?.error || 'Ошибка загрузки данных'))
       .finally(() => setLoading(false));
   }, [selectedExpId]);
+
+  // Measurement frequency (Hz)
+  const measHz = useMemo(() => {
+    if (!durationMs || !total) return 5; // default assumption
+    return total / (durationMs / 1000);
+  }, [total, durationMs]);
+
+  // Convert interval (sec) → step (every Nth row)
+  const step = useMemo(() => {
+    if (intervalSec <= 0) return 1;
+    return Math.max(1, Math.round(intervalSec * measHz));
+  }, [intervalSec, measHz]);
+
+  // Filter interval options: hide intervals shorter than measurement period
+  const availableIntervals = useMemo(() => {
+    const period = measHz > 0 ? 1 / measHz : 0.2;
+    return INTERVAL_OPTIONS.filter((o) => o.sec === 0 || o.sec >= period * 1.5);
+  }, [measHz]);
 
   // Fetch with filters (debounced via ref)
   const fetchData = useCallback(async () => {
@@ -155,7 +177,7 @@ export default function GraphsTab({ experimentId }: Props) {
   }, [fetchData]);
 
   // Reset page on filter change
-  useEffect(() => { setPage(1); }, [timeRange, step, perPage]);
+  useEffect(() => { setPage(1); }, [timeRange, intervalSec, perPage]);
 
   const toggleParam = (key: ParamKey) => {
     setActiveParams((prev) =>
@@ -321,11 +343,11 @@ export default function GraphsTab({ experimentId }: Props) {
 
             {/* Step selector + info */}
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5, flexWrap: 'wrap' }}>
-              <Typography variant="caption" color="text.secondary">Шаг:</Typography>
-              <ToggleButtonGroup value={step} exclusive size="small"
-                onChange={(_, v) => { if (v !== null) setStep(v); }}>
-                {STEP_OPTIONS.map((o) => (
-                  <ToggleButton key={o.value} value={o.value} sx={{ px: 1, py: 0.25, fontSize: '0.75rem' }}>
+              <Typography variant="caption" color="text.secondary">Интервал:</Typography>
+              <ToggleButtonGroup value={intervalSec} exclusive size="small"
+                onChange={(_, v) => { if (v !== null) setIntervalSec(v); }}>
+                {availableIntervals.map((o) => (
+                  <ToggleButton key={o.sec} value={o.sec} sx={{ px: 1, py: 0.25, fontSize: '0.75rem' }}>
                     {o.label}
                   </ToggleButton>
                 ))}
@@ -346,7 +368,8 @@ export default function GraphsTab({ experimentId }: Props) {
 
               <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
                 {filteredTotal.toLocaleString()} строк
-                {step > 1 && <> (каждая {step}-я)</>}
+                {measHz > 0 && <> | {measHz.toFixed(1)} Гц</>}
+                {intervalSec > 0 && <> | шаг {intervalSec}с (×{step})</>}
               </Typography>
             </Stack>
           </Paper>
