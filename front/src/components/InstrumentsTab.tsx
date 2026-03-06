@@ -279,20 +279,23 @@ export default function InstrumentsTab() {
                   })}
                 </ToggleButtonGroup>
 
-                {/* Desktop: 2-column grid | Mobile: stacked */}
-                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5 }}>
-                  {/* Left: Mode + Frequency */}
+                <Stack spacing={1.5}>
+                  {/* Measurement mode */}
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
                       Режим измерения
                     </Typography>
                     <ToggleButtonGroup value={s.function} exclusive size="small" fullWidth
                       onChange={(_, v) => v && upd({ function: v })}
-                      sx={{ mb: 1.5, '& .MuiToggleButton-root': { flex: 1, fontSize: '0.8rem', py: 0.5 } }}>
+                      sx={{ '& .MuiToggleButton-root': { flex: 1, fontSize: '0.8rem', py: 0.5 } }}>
                       <ToggleButton value="CURR">Ток (A)</ToggleButton>
                       <ToggleButton value="RES">Сопр. (R)</ToggleButton>
                       <ToggleButton value="CHAR">Заряд (Q)</ToggleButton>
                     </ToggleButtonGroup>
+                  </Box>
+
+                  {/* Frequency + Auto-range + Zero correct — one row */}
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
                     <TextField label="Частота, Гц" type="number" size="small"
                       value={s.frequency}
                       onChange={(e) => {
@@ -301,26 +304,23 @@ export default function InstrumentsTab() {
                         upd({ frequency: v });
                       }}
                       inputProps={{ min: 1, max: 20, step: 1 }}
-                      sx={{ width: 130 }}
+                      sx={{ width: { xs: '100%', sm: 130 } }}
                       helperText={`${s.frequency} зам./сек`}
                     />
-                  </Box>
+                    <FormControlLabel
+                      control={<Switch checked={s.auto_range} size="small"
+                        onChange={(e) => upd({ auto_range: e.target.checked })} />}
+                      label={<Typography variant="body2">Авто-диапазон</Typography>}
+                    />
+                    <FormControlLabel
+                      control={<Checkbox checked={s.zero_correct} size="small"
+                        onChange={(e) => upd({ zero_correct: e.target.checked })} />}
+                      label={<Typography variant="body2">Корр. нуля</Typography>}
+                    />
+                  </Stack>
 
-                  {/* Right: Options + Source */}
+                  {/* Source HV */}
                   <Box>
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                      <FormControlLabel
-                        control={<Switch checked={s.auto_range} size="small"
-                          onChange={(e) => upd({ auto_range: e.target.checked })} />}
-                        label={<Typography variant="body2">Авто-диапазон</Typography>}
-                        sx={{ mr: 0 }}
-                      />
-                      <FormControlLabel
-                        control={<Checkbox checked={s.zero_correct} size="small"
-                          onChange={(e) => upd({ zero_correct: e.target.checked })} />}
-                        label={<Typography variant="body2">Корр. нуля</Typography>}
-                      />
-                    </Stack>
                     <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
                       <FormControlLabel
                         control={<Switch checked={s.source_on} size="small"
@@ -342,11 +342,11 @@ export default function InstrumentsTab() {
                         onChange={(_, v) => upd({ source_volt: v as number })}
                         valueLabelDisplay="auto" size="small"
                         marks={[{ value: -1000, label: '-1kV' }, { value: 0, label: '0' }, { value: 1000, label: '1kV' }]}
-                        sx={{ mt: 0.5, mx: 1 }}
+                        sx={{ mt: 0.5, width: '80%', mx: 'auto' }}
                       />
                     )}
                   </Box>
-                </Box>
+                </Stack>
               </Paper>
             );
           })()}
