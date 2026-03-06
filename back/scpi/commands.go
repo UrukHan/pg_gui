@@ -42,21 +42,23 @@ func DefaultSettings() InstrumentSettings {
 	}
 }
 
-// ApplySettings sends configuration SCPI commands to the instrument
-// All commands are sent on a single TCP connection (TH2690 requirement)
+// ApplySettings sends configuration SCPI commands to the instrument.
+// Best-effort: logs warnings for failed commands but does not fail the experiment.
+// TH2690 may not support remote configuration — instrument keeps front-panel settings.
 func ApplySettings(host string, port int, s InstrumentSettings) error {
 	cmds := buildSettingsCommands(s)
 	log.Printf("[SCPI] ApplySettings %s:%d commands=%v", host, port, cmds)
 	results, err := SendBatch(host, port, cmds, 2*time.Second)
 	if err != nil {
-		log.Printf("[SCPI] ApplySettings %s:%d batch ERROR: %v", host, port, err)
-		return err
+		log.Printf("[SCPI] ApplySettings %s:%d batch connection error: %v (will continue with front-panel settings)", host, port, err)
+		return nil // best-effort, don't block experiment
 	}
 	for _, cmd := range cmds {
 		resp := results[cmd]
-		log.Printf("[SCPI] ApplySettings %s:%d cmd=%q resp=%q", host, port, cmd, resp)
 		if strings.HasPrefix(resp, "Error") {
-			log.Printf("[SCPI] ApplySettings %s:%d WARNING: cmd %q returned %q", host, port, cmd, resp)
+			log.Printf("[SCPI] ApplySettings %s:%d WARNING: cmd %q -> %q (ignored)", host, port, cmd, resp)
+		} else {
+			log.Printf("[SCPI] ApplySettings %s:%d OK: cmd %q -> %q", host, port, cmd, resp)
 		}
 	}
 	return nil
@@ -67,10 +69,10 @@ func ApplySettings(host string, port int, s InstrumentSettings) error {
 func buildSettingsCommands(s InstrumentSettings) []string {
 	var cmds []string
 
-	// 1. Stop any running measurement
-	cmds = append(cmds, "FUNC:STOP")
+	// NOTE: Do NOT send FUNC:STOP here — it disrupts front-panel measurement state.
+	// FUNC:RUN is sent separately by StartExperiment after settings are applied.
 
-	// 2. Set measurement function (space, not colon — FUNC CURR, FUNC RES, FUNC CHAR)
+	// 1. Set measurement function (space, not colon — FUNC CURR, FUNC RES, FUNC CHAR)
 	switch s.Function {
 	case "RES":
 		cmds = append(cmds, "FUNC RES")

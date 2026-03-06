@@ -340,18 +340,20 @@ export default function InstrumentsTab() {
 
                   {/* RIGHT COLUMN: Source HV — always visible, disabled when off */}
                   <Stack spacing={1.5}>
-                    <FormControlLabel
-                      control={<Switch checked={s.source_on} size="small"
-                        onChange={(e) => upd({ source_on: e.target.checked })} />}
-                      label={<Typography variant="body2" fontWeight={600}>Источник HV</Typography>}
-                    />
-                    <TextField label="Напряжение, В" type="number" size="small"
-                      value={s.source_volt}
-                      onChange={(e) => upd({ source_volt: Number(e.target.value) })}
-                      inputProps={{ min: -1000, max: 1000, step: 1 }}
-                      disabled={!s.source_on}
-                      fullWidth
-                    />
+                    <Stack direction="row" alignItems="center" spacing={1.5}>
+                      <TextField label="Напряжение, В" type="number" size="small"
+                        value={s.source_volt}
+                        onChange={(e) => upd({ source_volt: Number(e.target.value) })}
+                        inputProps={{ min: -1000, max: 1000, step: 1 }}
+                        disabled={!s.source_on}
+                        sx={{ width: 140 }}
+                      />
+                      <FormControlLabel sx={{ m: 0 }}
+                        control={<Switch checked={s.source_on} size="small"
+                          onChange={(e) => upd({ source_on: e.target.checked })} />}
+                        label={<Typography variant="body2" fontWeight={600}>HV</Typography>}
+                      />
+                    </Stack>
                     <Slider value={s.source_volt} min={-1000} max={1000} step={1}
                       onChange={(_, v) => upd({ source_volt: v as number })}
                       valueLabelDisplay="auto" size="small"

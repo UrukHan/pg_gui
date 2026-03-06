@@ -2,6 +2,7 @@ package scpi
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -140,13 +141,15 @@ func FetchAll(host string, port int) (*Response, error) {
 
 // Run sends FUNC:RUN
 func Run(host string, port int) error {
-	_, err := Send(host, port, "FUNC:RUN", defaultTimeout)
+	resp, err := Send(host, port, "FUNC:RUN", defaultTimeout)
+	log.Printf("[SCPI] FUNC:RUN %s:%d resp=%q err=%v", host, port, resp, err)
 	return err
 }
 
 // Stop sends FUNC:STOP
 func Stop(host string, port int) error {
-	_, err := Send(host, port, "FUNC:STOP", defaultTimeout)
+	resp, err := Send(host, port, "FUNC:STOP", defaultTimeout)
+	log.Printf("[SCPI] FUNC:STOP %s:%d resp=%q err=%v", host, port, resp, err)
 	return err
 }
 
