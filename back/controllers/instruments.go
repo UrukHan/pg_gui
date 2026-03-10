@@ -155,6 +155,14 @@ func StartExperiment(c *gin.Context) {
 		return
 	}
 
+	// Prevent double-start: check if any experiment is already running
+	var runningCount int64
+	database.DB.Model(&models.Experiment{}).Where("status = ?", models.StatusRunning).Count(&runningCount)
+	if runningCount > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "Уже есть запущенный эксперимент. Остановите его перед запуском нового."})
+		return
+	}
+
 	var req StartExperimentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -277,13 +285,16 @@ func StopExperiment(c *gin.Context) {
 	// Stop polling
 	scpi.DefaultRunner.Stop(exp.ID)
 
-	// Stop instruments
+	// Stop instruments and reset to safe state
 	idStrs := strings.Split(exp.InstrumentIDs, ",")
 	for _, s := range idStrs {
 		instID, _ := strconv.Atoi(strings.TrimSpace(s))
 		var inst models.Instrument
 		if database.DB.First(&inst, instID).Error == nil {
 			scpi.Stop(inst.Host, inst.Port)
+			// Turn off source and ammeter for safety
+			scpi.Send(inst.Host, inst.Port, "FUNC:SRC OFF", 2*time.Second)
+			scpi.Send(inst.Host, inst.Port, "FUNC:AMMET OFF", 2*time.Second)
 		}
 	}
 

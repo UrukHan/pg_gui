@@ -35,6 +35,7 @@ export interface Experiment {
   end_time: string | null;
   instrument_ids: string;
   notes: string;
+  settings_json: string;
   video_path: string;
   created_at: string;
 }

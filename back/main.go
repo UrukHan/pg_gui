@@ -23,6 +23,16 @@ import (
 func main() {
 	database.Init()
 	storage.Init()
+
+	// Clean orphaned experiments: if server restarted, mark stale "running"/"stopping" as "error"
+	var orphanCount int64
+	database.DB.Model(&models.Experiment{}).Where("status IN ?", []string{"running", "stopping"}).Count(&orphanCount)
+	if orphanCount > 0 {
+		database.DB.Model(&models.Experiment{}).Where("status IN ?", []string{"running", "stopping"}).
+			Update("status", models.StatusError)
+		log.Printf("[STARTUP] Cleaned %d orphaned running/stopping experiments", orphanCount)
+	}
+
 	syncInstruments()
 	syncCameras()
 

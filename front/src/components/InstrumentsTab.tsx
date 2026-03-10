@@ -159,11 +159,10 @@ export default function InstrumentsTab() {
   };
 
   const handleStart = async () => {
-    if (buttonLock) return;
+    if (buttonLock || runningExp) return;
     if (!expName.trim()) { setError('Введите название эксперимента'); return; }
     if (selectedInstruments.length === 0) { setError('Выберите хотя бы один прибор'); return; }
     setButtonLock(true);
-    setTimeout(() => setButtonLock(false), 3000);
     setError('');
     try {
       // Build per-instrument settings map for backend
@@ -183,13 +182,14 @@ export default function InstrumentsTab() {
       setSuccess('Эксперимент запущен');
     } catch (e: any) {
       setError(e.response?.data?.error || 'Ошибка запуска');
+    } finally {
+      setButtonLock(false);
     }
   };
 
   const handleStop = async () => {
     if (!runningExp || buttonLock) return;
     setButtonLock(true);
-    setTimeout(() => setButtonLock(false), 3000);
     try {
       await stopExperiment(runningExp.id);
       setRunningExp(null);
@@ -199,6 +199,8 @@ export default function InstrumentsTab() {
       setExpNotes('');
     } catch (e: any) {
       setError(e.response?.data?.error || 'Ошибка остановки');
+    } finally {
+      setButtonLock(false);
     }
   };
 
@@ -378,7 +380,7 @@ export default function InstrumentsTab() {
             </Typography>
             <Button
               variant="contained" color="success" startIcon={<PlayArrowIcon />}
-              onClick={handleStart} disabled={buttonLock || !expName.trim() || selectedInstruments.length === 0}
+              onClick={handleStart} disabled={buttonLock || !!runningExp || !expName.trim() || selectedInstruments.length === 0}
               sx={{ minWidth: { xs: 'auto', sm: 140 } }}
             >
               Запустить

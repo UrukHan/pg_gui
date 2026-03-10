@@ -17,7 +17,7 @@ import {
 import zoomPlugin from 'chartjs-plugin-zoom';
 import { Line } from 'react-chartjs-2';
 import { getExperimentData, listExperiments, getExperimentVideoUrl, listInstruments } from '@/api';
-import type { Experiment, Measurement, Instrument } from '@/types';
+import type { Experiment, Measurement, Instrument, InstrumentSettings } from '@/types';
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement,
@@ -78,7 +78,7 @@ export default function GraphsTab({ experimentId }: Props) {
   const [experiment, setExperiment] = useState<Experiment | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [activeParams, setActiveParams] = useState<ParamKey[]>(['voltage', 'current']);
+  const [activeParams, setActiveParams] = useState<ParamKey[]>(['source', 'current']);
   const [chartMode, setChartMode] = useState<'combined' | 'separate'>('combined');
   const [viewMode, setViewMode] = useState<'chart' | 'table' | 'video'>('chart');
   const [instrumentsMap, setInstrumentsMap] = useState<Record<number, Instrument>>({});
@@ -345,6 +345,22 @@ export default function GraphsTab({ experimentId }: Props) {
             {durationMs > 0 && <> | {fmtMs(durationMs)}</>}
           </Typography>
         )}
+
+        {/* Experiment settings summary */}
+        {experiment?.settings_json && experiment.settings_json !== '{}' && (() => {
+          try {
+            const settings = JSON.parse(experiment.settings_json) as Record<string, InstrumentSettings>;
+            const parts = Object.entries(settings).map(([instId, s]) => {
+              const inst = instrumentsMap[Number(instId)];
+              const name = inst?.model || inst?.name || `#${instId}`;
+              const funcLabel = s.function === 'CURR' ? 'Ток' : s.function === 'RES' ? 'Сопр.' : 'Заряд';
+              return `${name}: ${funcLabel} ${s.frequency}Гц${s.source_on ? ` HV:${s.source_volt}В` : ''}`;
+            });
+            return (
+              <Chip label={parts.join(' | ')} size="small" variant="outlined" color="info" sx={{ whiteSpace: 'normal', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal' } }} />
+            );
+          } catch { return null; }
+        })()}
       </Stack>
 
       {error && <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert>}

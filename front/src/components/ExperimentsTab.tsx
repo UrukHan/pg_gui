@@ -15,9 +15,9 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useAuth } from '@/context/AuthContext';
 import {
-  listExperiments, deleteExperiment, getExperimentVideoUrl, listUsers,
+  listExperiments, deleteExperiment, getExperimentVideoUrl, listUsers, listInstruments,
 } from '@/api';
-import type { Experiment, User } from '@/types';
+import type { Experiment, User, Instrument, InstrumentSettings } from '@/types';
 import dynamic from 'next/dynamic';
 
 const GraphsTab = dynamic(() => import('@/components/GraphsTab'), { ssr: false });
@@ -29,6 +29,7 @@ export default function ExperimentsTab() {
 
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [instrumentsMap, setInstrumentsMap] = useState<Record<number, Instrument>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -44,9 +45,12 @@ export default function ExperimentsTab() {
 
   const load = useCallback(async () => {
     try {
-      const [expRes, usrRes] = await Promise.all([listExperiments(), listUsers()]);
+      const [expRes, usrRes, instRes] = await Promise.all([listExperiments(), listUsers(), listInstruments()]);
       setExperiments(expRes.data);
       setUsers(usrRes.data);
+      const map: Record<number, Instrument> = {};
+      instRes.data.forEach((inst) => { map[inst.id] = inst; });
+      setInstrumentsMap(map);
     } catch {
       setError('Ошибка загрузки экспериментов');
     } finally {
@@ -253,8 +257,33 @@ export default function ExperimentsTab() {
                   </Box>
                   <Box>
                     <Typography variant="caption" color="text.secondary">Приборы</Typography>
-                    <Typography variant="body2">{exp.instrument_ids || '—'}</Typography>
+                    <Typography variant="body2">
+                      {exp.instrument_ids ? exp.instrument_ids.split(',').map((id) => {
+                        const inst = instrumentsMap[Number(id.trim())];
+                        return inst?.model || inst?.name || `#${id.trim()}`;
+                      }).join(', ') : '—'}
+                    </Typography>
                   </Box>
+                  {/* Show experiment settings from settings_json */}
+                  {exp.settings_json && exp.settings_json !== '{}' && (() => {
+                    try {
+                      const settings = JSON.parse(exp.settings_json) as Record<string, InstrumentSettings>;
+                      return Object.entries(settings).map(([instId, s]) => {
+                        const inst = instrumentsMap[Number(instId)];
+                        const name = inst?.model || inst?.name || `#${instId}`;
+                        const funcLabel = s.function === 'CURR' ? 'Ток' : s.function === 'RES' ? 'Сопр.' : 'Заряд';
+                        return (
+                          <Box key={instId}>
+                            <Typography variant="caption" color="text.secondary">Настройки {name}</Typography>
+                            <Typography variant="body2">
+                              {funcLabel} | {s.frequency}Гц{s.source_on ? ` | HV: ${s.source_volt}В` : ' | HV: выкл'}
+                              {s.auto_range ? ' | Авто' : ''}{s.zero_correct ? ' | Zero' : ''}
+                            </Typography>
+                          </Box>
+                        );
+                      });
+                    } catch { return null; }
+                  })()}
                   {exp.notes && (
                     <Box>
                       <Typography variant="caption" color="text.secondary">Заметки</Typography>
