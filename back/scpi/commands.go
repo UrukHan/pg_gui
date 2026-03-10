@@ -41,66 +41,96 @@ func DefaultSettings() InstrumentSettings {
 	}
 }
 
-// ApplySettings is a no-op for TH2690.
-// Diagnostic confirmed: TH2690 LAN interface only supports 5 commands:
+// ApplySettings configures the TH2690 electrometer via SCPI.
+// TH2690 uses its own command tree (not standard Keithley SCPI):
 //
-//	*IDN?, *RST, FUNC:RUN, FUNC:STOP, FETCH:ALL_S?
+//	FUNC:FUNC CURR, FUNC:SRC ON, SRC:VALUE <v>, CURR:RANGE 1, etc.
 //
-// ALL other commands (SET and QUERY) return "Error 5--Not found".
-// Instrument must be configured via front panel.
-// FUNC:RUN is sent separately by StartExperiment.
+// Each command is sent on its own TCP connection.
+// Best-effort: logs warnings but does not block experiment start.
 func ApplySettings(host string, port int, s InstrumentSettings) error {
-	log.Printf("[SCPI] ApplySettings %s:%d (TH2690: remote config not supported, using front-panel settings) desired: func=%s freq=%.0f sourceOn=%v sourceVolt=%.0f",
-		host, port, s.Function, s.Frequency, s.SourceOn, s.SourceVolt)
+	log.Printf("[SCPI] ApplySettings %s:%d func=%s freq=%.0f autoRange=%v sourceOn=%v sourceVolt=%.0f",
+		host, port, s.Function, s.Frequency, s.AutoRange, s.SourceOn, s.SourceVolt)
+
+	cmds := buildSettingsCommands(s)
+	for _, cmd := range cmds {
+		resp, err := Send(host, port, cmd, 2*time.Second)
+		if err != nil {
+			log.Printf("[SCPI] ApplySettings %s:%d cmd=%q ERROR: %v", host, port, cmd, err)
+		} else if resp != "" {
+			log.Printf("[SCPI] ApplySettings %s:%d cmd=%q resp=%q", host, port, cmd, resp)
+		} else {
+			log.Printf("[SCPI] ApplySettings %s:%d cmd=%q OK", host, port, cmd)
+		}
+	}
 	return nil
 }
 
 // buildSettingsCommands converts settings into ordered SCPI commands for TH2690.
-// TH2690 has limited remote control; many commands may return Error 5.
-// Critical: SYST:ZCH OFF disables zero check (which shorts input → all reads = 0).
+// Uses correct TH2690 command tree from official manual (Chapter 6.6):
+//
+//	FUNC:FUNC, FUNC:SRC, FUNC:AMMET, SRC:VALUE, SRC:RANGE, CURR:RANGE, CURR:SPEED, etc.
 func buildSettingsCommands(s InstrumentSettings) []string {
 	var cmds []string
 
-	// 1. Disable zero check — THIS IS CRITICAL
-	// When zero check is ON (default after power-on), input is shorted and all measurements = 0
-	cmds = append(cmds, "SYST:ZCH OFF")
-	cmds = append(cmds, "KEY ZCHK") // fallback: simulate front-panel ZCHK key press
-
-	// 2. Set measurement function
+	// 1. Set measurement function (FUNC:FUNC <RES|VOLT|CURR|COUL|SRC>)
 	switch s.Function {
 	case "RES":
-		cmds = append(cmds, "FUNC RES")
+		cmds = append(cmds, "FUNC:FUNC RES")
 	case "CHAR":
-		cmds = append(cmds, "FUNC CHAR")
+		cmds = append(cmds, "FUNC:FUNC COUL")
 	default:
-		cmds = append(cmds, "FUNC CURR")
+		cmds = append(cmds, "FUNC:FUNC CURR")
 	}
 
-	// 3. Measurement speed
-	speed := FrequencyToSpeed(s.Frequency)
-	cmds = append(cmds, "SPEED "+speed)
+	// 2. Enable ammeter (FUNC:AMMET ON)
+	cmds = append(cmds, "FUNC:AMMET ON")
 
-	// 4. Range
-	if s.AutoRange {
-		cmds = append(cmds, "RANG:AUTO ON")
+	// 3. Disable Null/Zero (FUNC:ZERO OFF) — prevents offset
+	if !s.ZeroCorrect {
+		cmds = append(cmds, "FUNC:ZERO OFF")
 	} else {
-		cmds = append(cmds, "RANG:AUTO OFF")
-		if s.Range != "" {
-			cmds = append(cmds, fmt.Sprintf("RANG %s", s.Range))
+		cmds = append(cmds, "FUNC:ZERO ON")
+	}
+
+	// 4. Measurement speed per function (e.g. CURR:SPEED <FAST|MID|SLOW>)
+	speed := FrequencyToSpeed(s.Frequency)
+	switch s.Function {
+	case "RES":
+		cmds = append(cmds, "RES:SPEED "+speed)
+	default:
+		cmds = append(cmds, "CURR:SPEED "+speed)
+	}
+
+	// 5. Range: 1=Auto, 2..11=manual (CURR:RANGE <1..11>)
+	if s.AutoRange {
+		switch s.Function {
+		case "RES":
+			cmds = append(cmds, "RES:RANGE 1")
+		default:
+			cmds = append(cmds, "CURR:RANGE 1")
+		}
+	} else if s.Range != "" {
+		switch s.Function {
+		case "RES":
+			cmds = append(cmds, fmt.Sprintf("RES:RANGE %s", s.Range))
+		default:
+			cmds = append(cmds, fmt.Sprintf("CURR:RANGE %s", s.Range))
 		}
 	}
 
-	// 5. Zero correction
-	if s.ZeroCorrect {
-		cmds = append(cmds, "ZERO:CORR")
-	}
-
-	// 6. Source voltage
+	// 6. Source voltage (SRC:VALUE <float>, SRC:RANGE <1|2|3>)
 	if s.SourceOn {
-		cmds = append(cmds, fmt.Sprintf("SOUR:VOLT %.3f", s.SourceVolt))
-		cmds = append(cmds, "SOUR:STAT ON")
+		// Set range first: 1=-20~20V, 2=0~1000V, 3=-1000~0V
+		if s.SourceVolt >= 0 {
+			cmds = append(cmds, "SRC:RANGE 2")
+		} else {
+			cmds = append(cmds, "SRC:RANGE 3")
+		}
+		cmds = append(cmds, fmt.Sprintf("SRC:VALUE %.3f", s.SourceVolt))
+		cmds = append(cmds, "FUNC:SRC ON")
 	} else {
-		cmds = append(cmds, "SOUR:STAT OFF")
+		cmds = append(cmds, "FUNC:SRC OFF")
 	}
 
 	return cmds
@@ -119,15 +149,16 @@ func (s InstrumentSettings) PollingInterval() time.Duration {
 }
 
 // ReadSettings queries current instrument state (best-effort)
+// Uses correct TH2690 query commands: FUNC:FUNC?, FUNC:SRC?, SRC:VALUE?
 func ReadSettings(host string, port int) (*InstrumentSettings, error) {
 	s := DefaultSettings()
 
 	// Query function
-	if resp, err := Send(host, port, "FUNC?", defaultTimeout); err == nil && resp != "" {
+	if resp, err := Send(host, port, "FUNC:FUNC?", defaultTimeout); err == nil && resp != "" {
 		switch resp {
 		case "RES":
 			s.Function = "RES"
-		case "CHAR":
+		case "COUL":
 			s.Function = "CHAR"
 		default:
 			s.Function = "CURR"
@@ -135,14 +166,14 @@ func ReadSettings(host string, port int) (*InstrumentSettings, error) {
 	}
 
 	// Query source state
-	if resp, err := Send(host, port, "SOUR:STAT?", defaultTimeout); err == nil {
-		if resp == "ON" || resp == "1" {
+	if resp, err := Send(host, port, "FUNC:SRC?", defaultTimeout); err == nil {
+		if resp == "ON" {
 			s.SourceOn = true
 		}
 	}
 
 	// Query source voltage
-	if resp, err := Send(host, port, "SOUR:VOLT?", defaultTimeout); err == nil && resp != "" {
+	if resp, err := Send(host, port, "SRC:VALUE?", defaultTimeout); err == nil && resp != "" {
 		fmt.Sscanf(resp, "%f", &s.SourceVolt)
 	}
 
