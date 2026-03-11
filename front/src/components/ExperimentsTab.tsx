@@ -15,9 +15,9 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useAuth } from '@/context/AuthContext';
 import {
-  listExperiments, deleteExperiment, getExperimentVideoUrl, listUsers, listInstruments,
+  listExperiments, deleteExperiment, getExperimentVideoUrl, listUsers, listInstruments, listCameras,
 } from '@/api';
-import type { Experiment, User, Instrument, InstrumentSettings } from '@/types';
+import type { Experiment, User, Instrument, InstrumentSettings, Camera, HvPoint } from '@/types';
 import dynamic from 'next/dynamic';
 
 const GraphsTab = dynamic(() => import('@/components/GraphsTab'), { ssr: false });
@@ -30,6 +30,7 @@ export default function ExperimentsTab() {
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [instrumentsMap, setInstrumentsMap] = useState<Record<number, Instrument>>({});
+  const [camerasAll, setCamerasAll] = useState<Camera[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -45,12 +46,13 @@ export default function ExperimentsTab() {
 
   const load = useCallback(async () => {
     try {
-      const [expRes, usrRes, instRes] = await Promise.all([listExperiments(), listUsers(), listInstruments()]);
+      const [expRes, usrRes, instRes, camRes] = await Promise.all([listExperiments(), listUsers(), listInstruments(), listCameras()]);
       setExperiments(expRes.data);
       setUsers(usrRes.data);
       const map: Record<number, Instrument> = {};
       instRes.data.forEach((inst) => { map[inst.id] = inst; });
       setInstrumentsMap(map);
+      setCamerasAll(camRes.data);
     } catch {
       setError('Ошибка загрузки экспериментов');
     } finally {
@@ -199,6 +201,18 @@ export default function ExperimentsTab() {
                 </Typography>
               </Box>
 
+              {/* Instrument count + camera count */}
+              <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0, mr: 1 }}>
+                {exp.instrument_ids && (
+                  <Chip label={`${exp.instrument_ids.split(',').length} приб.`}
+                    size="small" variant="outlined" sx={{ height: 22 }} />
+                )}
+                {exp.duration_sec > 0 && (
+                  <Chip label={`${Math.floor(exp.duration_sec / 60)}м${exp.duration_sec % 60 ? (exp.duration_sec % 60) + 'с' : ''}`}
+                    size="small" variant="outlined" color="primary" sx={{ height: 22 }} />
+                )}
+              </Stack>
+
               {/* Status */}
               <Chip
                 label={statusLabel(exp.status)}
@@ -264,6 +278,22 @@ export default function ExperimentsTab() {
                       }).join(', ') : '—'}
                     </Typography>
                   </Box>
+                  {exp.duration_sec > 0 && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">План. длительность</Typography>
+                      <Typography variant="body2">
+                        {exp.duration_sec < 60 ? `${exp.duration_sec} сек` : `${Math.floor(exp.duration_sec / 60)} мин ${exp.duration_sec % 60 ? (exp.duration_sec % 60) + ' сек' : ''}`}
+                      </Typography>
+                    </Box>
+                  )}
+                  {camerasAll.length > 0 && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Камеры</Typography>
+                      <Typography variant="body2">
+                        {camerasAll.map((c) => c.name).join(', ')}
+                      </Typography>
+                    </Box>
+                  )}
                   {/* Show experiment settings from settings_json */}
                   {exp.settings_json && exp.settings_json !== '{}' && (() => {
                     try {
@@ -278,6 +308,27 @@ export default function ExperimentsTab() {
                             <Typography variant="body2">
                               {funcLabel} | {s.frequency}Гц{s.source_on ? ` | HV: ${s.source_volt}В` : ' | HV: выкл'}
                               {s.auto_range ? ' | Авто' : ''}{s.zero_correct ? ' | Zero' : ''}
+                            </Typography>
+                          </Box>
+                        );
+                      });
+                    } catch { return null; }
+                  })()}
+                  {/* Show HV schedule summary */}
+                  {exp.hv_schedule_json && exp.hv_schedule_json !== '{}' && (() => {
+                    try {
+                      const sched = JSON.parse(exp.hv_schedule_json) as Record<string, HvPoint[]>;
+                      return Object.entries(sched).filter(([, pts]) => pts.length > 0).map(([instId, pts]) => {
+                        const inst = instrumentsMap[Number(instId)];
+                        const name = inst?.model || inst?.name || `#${instId}`;
+                        const voltRange = pts.length > 0
+                          ? `${Math.min(...pts.map((p) => p.voltage))}–${Math.max(...pts.map((p) => p.voltage))}В`
+                          : '';
+                        return (
+                          <Box key={`hv-${instId}`}>
+                            <Typography variant="caption" color="text.secondary">HV расписание {name}</Typography>
+                            <Typography variant="body2">
+                              {pts.length} точек | {voltRange}
                             </Typography>
                           </Box>
                         );

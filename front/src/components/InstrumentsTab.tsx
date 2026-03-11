@@ -23,8 +23,8 @@ import {
 import { Line } from 'react-chartjs-2';
 import { useAuth } from '@/context/AuthContext';
 import {
-  listInstruments, startExperiment, stopExperiment, listExperiments,
-  getExperimentStatus, getExperimentData, listCameras, applyInstrumentSettings,
+  listInstruments, toggleInstrument, startExperiment, stopExperiment, listExperiments,
+  getExperimentStatus, getExperimentData, listCameras, toggleCamera, applyInstrumentSettings,
 } from '@/api';
 import type { Instrument, Camera, Experiment, Measurement, InstrumentSettings, HvPoint } from '@/types';
 
@@ -462,11 +462,14 @@ export default function InstrumentsTab() {
             {cameras.length === 0 && <Typography variant="caption" color="text.disabled">Нет камер</Typography>}
             {cameras.map((cam) => (
               <Stack key={cam.id} direction="row" alignItems="center" spacing={0.5}>
-                <VideocamIcon sx={{ fontSize: 18, color: cam.active ? 'success.main' : 'text.disabled' }} />
+                {cam.online
+                  ? <VideocamIcon sx={{ fontSize: 18, color: 'success.main' }} />
+                  : <VideocamOffIcon sx={{ fontSize: 18, color: 'error.main' }} />}
                 <Typography variant="caption" sx={{ flex: 1 }} noWrap>{cam.name}</Typography>
-                <Chip label={cam.online ? 'On' : 'Off'} size="small"
-                  color={cam.online ? 'success' : 'default'} variant="outlined"
-                  sx={{ height: 20, '& .MuiChip-label': { px: 0.5, fontSize: '0.6rem' } }} />
+                <Switch size="small" checked={cam.active} disabled={!cam.online || !!runningExp}
+                  onChange={async () => {
+                    try { const r = await toggleCamera(cam.id); setCameras((p) => p.map((c) => c.id === cam.id ? r.data : c)); } catch {}
+                  }} />
               </Stack>
             ))}
 
@@ -583,7 +586,7 @@ export default function InstrumentsTab() {
             const disabled = !inst.online || isOtherRunning;
             return (
               <Paper key={inst.id} variant="outlined" sx={{
-                p: 1.5, display: 'flex', flexDirection: 'column', overflow: 'auto',
+                p: 1.5, display: 'flex', flexDirection: 'column', overflow: 'hidden',
                 opacity: inst.online ? 1 : 0.35,
               }}>
                 <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
@@ -597,6 +600,10 @@ export default function InstrumentsTab() {
                       sx={{ color: schedule.length > 0 ? 'warning.main' : 'text.disabled' }}>
                       <TimelineIcon fontSize="small" />
                     </IconButton>
+                    <Switch size="small" checked={inst.active} disabled={!!runningExp}
+                      onChange={async () => {
+                        try { const r = await toggleInstrument(inst.id); setInstruments((p) => p.map((x) => x.id === inst.id ? r.data : x)); } catch {}
+                      }} />
                     <Chip label={inst.online ? 'Online' : 'Offline'} size="small"
                       color={inst.online ? 'success' : 'error'}
                       variant={inst.online ? 'filled' : 'outlined'}
@@ -646,12 +653,13 @@ export default function InstrumentsTab() {
                     onChange={(e) => upd({ source_volt: Number(e.target.value) })}
                     inputProps={{ min: -1000, max: 1000, step: 1 }} />
                 </Stack>
-                <Slider value={s.source_volt} min={-1000} max={1000} step={1} size="small"
-                  disabled={disabled || !s.source_on} color="error"
-                  onChange={(_, v) => upd({ source_volt: v as number })}
-                  valueLabelDisplay="auto"
-                  marks={[{ value: -1000, label: '-1kV' }, { value: 0, label: '0' }, { value: 1000, label: '1kV' }]}
-                  sx={{ mx: 1 }} />
+                <Box sx={{ width: '80%', mx: 'auto' }}>
+                  <Slider value={s.source_volt} min={-1000} max={1000} step={1} size="small"
+                    disabled={disabled || !s.source_on} color="error"
+                    onChange={(_, v) => upd({ source_volt: v as number })}
+                    valueLabelDisplay="auto"
+                    marks={[{ value: -1000, label: '-1kV' }, { value: 0, label: '0' }, { value: 1000, label: '1kV' }]} />
+                </Box>
               </Paper>
             );
           })}
