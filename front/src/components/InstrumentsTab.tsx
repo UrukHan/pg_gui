@@ -102,7 +102,7 @@ export default function InstrumentsTab() {
   const [liveMeasurements, setLiveMeasurements] = useState<Measurement[]>([]);
 
   const onlineInsts = useMemo(() => instruments.filter((i) => i.active && i.online), [instruments]);
-  const allInsts = useMemo(() => instruments.filter((i) => i.active), [instruments]);
+  const allInsts = useMemo(() => instruments, [instruments]);
 
   const isOwner = !!(runningExp && user && runningExp.user_id === user.id);
   const isOtherRunning = !!(runningExp && user && runningExp.user_id !== user.id);
@@ -252,6 +252,12 @@ export default function InstrumentsTab() {
   const addSchedulePoint = () => {
     const last = editPoints[editPoints.length - 1];
     setEditPoints([...editPoints, { time_sec: last ? last.time_sec + 10 : 0, voltage: last ? last.voltage : 0 }]);
+  };
+  // Ensure at least 1 default point when opening editor
+  const openScheduleEditorWrapped = (instId: number) => {
+    const pts = getSchedule(instId);
+    setScheduleInstId(instId);
+    setEditPoints(pts.length > 0 ? [...pts] : [{ time_sec: 0, voltage: 0 }]);
   };
   const removeSchedulePoint = (idx: number) => {
     setEditPoints(editPoints.filter((_, i) => i !== idx));
@@ -465,8 +471,8 @@ export default function InstrumentsTab() {
                 {cam.online
                   ? <VideocamIcon sx={{ fontSize: 18, color: 'success.main' }} />
                   : <VideocamOffIcon sx={{ fontSize: 18, color: 'error.main' }} />}
-                <Typography variant="caption" sx={{ flex: 1 }} noWrap>{cam.name}</Typography>
-                <Switch size="small" checked={cam.active} disabled={!cam.online || !!runningExp}
+                <Typography variant="caption" sx={{ flex: 1, opacity: cam.active ? 1 : 0.4 }} noWrap>{cam.name}</Typography>
+                <Switch size="small" checked={cam.active} disabled={!!runningExp}
                   onChange={async () => {
                     try { const r = await toggleCamera(cam.id); setCameras((p) => p.map((c) => c.id === cam.id ? r.data : c)); } catch {}
                   }} />
@@ -583,19 +589,19 @@ export default function InstrumentsTab() {
             const upd = (patch: Partial<InstrumentSettings>) => {
               if (runningExp) { updateAndApply(inst.id, patch); } else { updateSettings(inst.id, patch); }
             };
-            const disabled = !inst.online || isOtherRunning;
+            const disabled = !inst.online || !inst.active || isOtherRunning;
             return (
               <Paper key={inst.id} variant="outlined" sx={{
                 p: 1.5, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-                opacity: inst.online ? 1 : 0.35,
               }}>
                 <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-                  <Typography variant="subtitle2" fontWeight={700} noWrap>
+                  <Typography variant="subtitle2" fontWeight={700} noWrap
+                    sx={{ opacity: inst.active ? 1 : 0.4 }}>
                     {inst.model || inst.name}
                   </Typography>
                   <Stack direction="row" spacing={0.5} alignItems="center">
                     <IconButton size="small" disabled={disabled || !!runningExp}
-                      onClick={() => openScheduleEditor(inst.id)}
+                      onClick={() => openScheduleEditorWrapped(inst.id)}
                       title="Расписание HV"
                       sx={{ color: schedule.length > 0 ? 'warning.main' : 'text.disabled' }}>
                       <TimelineIcon fontSize="small" />
@@ -614,9 +620,10 @@ export default function InstrumentsTab() {
                 {schedule.length > 0 && (
                   <Chip label={`HV расписание: ${schedule.length} точек`}
                     size="small" color="warning" variant="outlined"
-                    sx={{ mb: 0.5, alignSelf: 'flex-start', height: 20, fontSize: '0.65rem' }} />
+                    sx={{ mb: 0.5, alignSelf: 'flex-start', height: 20, fontSize: '0.65rem', opacity: inst.active ? 1 : 0.4 }} />
                 )}
 
+                <Box sx={{ opacity: inst.active && inst.online ? 1 : 0.3, pointerEvents: inst.active && inst.online ? 'auto' : 'none' }}>
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 0.3 }}>Режим измерения</Typography>
                 <ToggleButtonGroup value={s.function} exclusive size="small" fullWidth disabled={disabled}
                   onChange={(_, v) => v && upd({ function: v })}
@@ -660,6 +667,7 @@ export default function InstrumentsTab() {
                     valueLabelDisplay="auto"
                     marks={[{ value: -1000, label: '-1kV' }, { value: 0, label: '0' }, { value: 1000, label: '1kV' }]} />
                 </Box>
+                </Box>{/* end opacity wrapper */}
               </Paper>
             );
           })}
@@ -682,38 +690,45 @@ export default function InstrumentsTab() {
             Задайте ключевые точки изменения напряжения. Между точками значение интерполируется линейно.
             Длительность эксперимента: <b>{fmtTime(durationSec)}</b>
           </Typography>
-          <Table size="small" sx={{ mb: 2 }}>
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 700, width: 120 }}>Время (сек)</TableCell>
-                <TableCell sx={{ fontWeight: 700, width: 120 }}>Напряжение (В)</TableCell>
-                <TableCell sx={{ width: 50 }} />
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {editPoints.map((pt, idx) => (
-                <TableRow key={idx}>
-                  <TableCell>
-                    <TextField type="number" size="small" value={pt.time_sec}
-                      onChange={(e) => updateSchedulePoint(idx, 'time_sec', Number(e.target.value))}
-                      inputProps={{ min: 0, max: durationSec || 9999, step: 1 }}
-                      sx={{ width: 100 }} />
-                  </TableCell>
-                  <TableCell>
-                    <TextField type="number" size="small" value={pt.voltage}
-                      onChange={(e) => updateSchedulePoint(idx, 'voltage', Number(e.target.value))}
-                      inputProps={{ min: -1000, max: 1000, step: 1 }}
-                      sx={{ width: 100 }} />
-                  </TableCell>
-                  <TableCell>
-                    <IconButton size="small" onClick={() => removeSchedulePoint(idx)} color="error">
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
+          <Box sx={{ maxHeight: 180, overflowY: 'auto', mb: 2,
+            '&::-webkit-scrollbar': { display: 'none' },
+            scrollbarWidth: 'none',
+          }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 700, width: 120 }}>Время (сек)</TableCell>
+                  <TableCell sx={{ fontWeight: 700, width: 120 }}>Напряжение (В)</TableCell>
+                  <TableCell sx={{ width: 50 }} />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHead>
+              <TableBody>
+                {editPoints.map((pt, idx) => (
+                  <TableRow key={idx}>
+                    <TableCell>
+                      <TextField type="number" size="small" value={pt.time_sec}
+                        onChange={(e) => updateSchedulePoint(idx, 'time_sec', Number(e.target.value))}
+                        inputProps={{ min: 0, max: durationSec || 9999, step: 1 }}
+                        sx={{ width: 100 }} />
+                    </TableCell>
+                    <TableCell>
+                      <TextField type="number" size="small" value={pt.voltage}
+                        onChange={(e) => updateSchedulePoint(idx, 'voltage', Number(e.target.value))}
+                        inputProps={{ min: -1000, max: 1000, step: 1 }}
+                        sx={{ width: 100 }} />
+                    </TableCell>
+                    <TableCell>
+                      {idx === 0
+                        ? <Box sx={{ width: 32 }} />
+                        : <IconButton size="small" onClick={() => removeSchedulePoint(idx)} color="error">
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Box>
           <Button startIcon={<AddIcon />} onClick={addSchedulePoint} size="small" variant="outlined">
             Добавить точку
           </Button>
