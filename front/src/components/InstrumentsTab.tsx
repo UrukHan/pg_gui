@@ -101,7 +101,8 @@ export default function InstrumentsTab() {
   const [activeChartInstIdx, setActiveChartInstIdx] = useState(0);
   const [liveMeasurements, setLiveMeasurements] = useState<Measurement[]>([]);
 
-  const onlineInsts = useMemo(() => instruments.filter((i) => i.active && i.online), [instruments]);
+  const onlineInsts = useMemo(() => instruments.filter((i) => i.online), [instruments]);
+  const activeOnlineInsts = useMemo(() => instruments.filter((i) => i.active && i.online), [instruments]);
   const allInsts = useMemo(() => instruments, [instruments]);
 
   const isOwner = !!(runningExp && user && runningExp.user_id === user.id);
@@ -141,6 +142,8 @@ export default function InstrumentsTab() {
       const running = res.data.find((e: Experiment) => e.status === 'running');
       if (running) {
         setRunningExp(running);
+        if (running.name) setExpName(running.name);
+        if (running.notes) setExpNotes(running.notes);
         if (running.duration_sec) setDurationSec(running.duration_sec);
         const st = await getExperimentStatus(running.id);
         setMeasurementCount(st.data.measurement_count);
@@ -199,23 +202,23 @@ export default function InstrumentsTab() {
   const handleStart = async () => {
     if (buttonLock || runningExp) return;
     if (!expName.trim()) { setError('Введите название'); return; }
-    if (onlineInsts.length === 0) { setError('Нет приборов онлайн'); return; }
+    if (activeOnlineInsts.length === 0) { setError('Нет активных приборов онлайн'); return; }
     setButtonLock(true);
     setError('');
     try {
       const settingsPayload: Record<string, InstrumentSettings> = {};
-      for (const inst of onlineInsts) {
+      for (const inst of activeOnlineInsts) {
         settingsPayload[String(inst.id)] = getSettings(inst.id);
       }
       // Build HV schedule payload (only for instruments that have a schedule)
       const hvPayload: Record<string, HvPoint[]> = {};
-      for (const inst of onlineInsts) {
+      for (const inst of activeOnlineInsts) {
         const pts = getSchedule(inst.id);
         if (pts.length > 0) hvPayload[String(inst.id)] = pts;
       }
       const res = await startExperiment({
         name: expName,
-        instrument_ids: onlineInsts.map((i) => i.id).join(','),
+        instrument_ids: activeOnlineInsts.map((i) => i.id).join(','),
         notes: expNotes,
         settings: settingsPayload,
         duration_sec: durationSec > 0 ? durationSec : undefined,
@@ -474,7 +477,7 @@ export default function InstrumentsTab() {
                 <Typography variant="caption" sx={{ flex: 1, opacity: cam.active ? 1 : 0.4 }} noWrap>{cam.name}</Typography>
                 <Switch size="small" checked={cam.active} disabled={!!runningExp}
                   onChange={async () => {
-                    try { const r = await toggleCamera(cam.id); setCameras((p) => p.map((c) => c.id === cam.id ? r.data : c)); } catch {}
+                    try { await toggleCamera(cam.id); setCameras((p) => p.map((c) => c.id === cam.id ? { ...c, active: !c.active } : c)); } catch {}
                   }} />
               </Stack>
             ))}
@@ -483,7 +486,7 @@ export default function InstrumentsTab() {
               {!runningExp ? (
                 <Button variant="contained" color="success" fullWidth startIcon={<PlayArrowIcon />}
                   onClick={handleStart}
-                  disabled={buttonLock || !expName.trim() || onlineInsts.length === 0}
+                  disabled={buttonLock || !expName.trim() || activeOnlineInsts.length === 0 || !!runningExp}
                   sx={{ py: 1.2, fontWeight: 700, fontSize: '0.9rem' }}>
                   Запустить
                 </Button>
@@ -536,7 +539,7 @@ export default function InstrumentsTab() {
               <Tabs value={activeChartInstIdx} onChange={(_, v) => setActiveChartInstIdx(v)} variant="fullWidth"
                 sx={{ minHeight: 32, '& .MuiTab-root': { minHeight: 32, py: 0.5, fontSize: '0.75rem' } }}>
                 {onlineInsts.map((inst, i) => (
-                  <Tab key={inst.id} label={inst.model || inst.name} value={i} />
+                  <Tab key={inst.id} label={inst.name} value={i} />
                 ))}
               </Tabs>
             )}
@@ -608,7 +611,7 @@ export default function InstrumentsTab() {
                     </IconButton>
                     <Switch size="small" checked={inst.active} disabled={!!runningExp}
                       onChange={async () => {
-                        try { const r = await toggleInstrument(inst.id); setInstruments((p) => p.map((x) => x.id === inst.id ? r.data : x)); } catch {}
+                        try { await toggleInstrument(inst.id); setInstruments((p) => p.map((x) => x.id === inst.id ? { ...x, active: !x.active } : x)); } catch {}
                       }} />
                     <Chip label={inst.online ? 'Online' : 'Offline'} size="small"
                       color={inst.online ? 'success' : 'error'}
@@ -651,18 +654,18 @@ export default function InstrumentsTab() {
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
                   <FormControlLabel sx={{ m: 0 }}
                     label={<Typography variant="caption" fontWeight={700} color={s.source_on ? 'error' : 'text.secondary'}>HV</Typography>}
-                    control={<Switch checked={s.source_on} size="small" disabled={disabled}
+                    control={<Switch checked={s.source_on} size="small" disabled={disabled || schedule.length > 0}
                       color="error"
                       onChange={(e) => upd({ source_on: e.target.checked })} />} />
                   <TextField label="В" type="number" size="small"
-                    disabled={disabled || !s.source_on}
+                    disabled={disabled || !s.source_on || schedule.length > 0}
                     value={s.source_volt} sx={{ width: 90 }}
                     onChange={(e) => upd({ source_volt: Number(e.target.value) })}
                     inputProps={{ min: -1000, max: 1000, step: 1 }} />
                 </Stack>
                 <Box sx={{ width: '80%', mx: 'auto' }}>
                   <Slider value={s.source_volt} min={-1000} max={1000} step={1} size="small"
-                    disabled={disabled || !s.source_on} color="error"
+                    disabled={disabled || !s.source_on || schedule.length > 0} color="error"
                     onChange={(_, v) => upd({ source_volt: v as number })}
                     valueLabelDisplay="auto"
                     marks={[{ value: -1000, label: '-1kV' }, { value: 0, label: '0' }, { value: 1000, label: '1kV' }]} />
