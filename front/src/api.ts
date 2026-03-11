@@ -90,6 +90,9 @@ export const getInstrumentSettings = (id: number) =>
 export const sendInstrumentCommand = (id: number, command: string) =>
   API.post<{ response: string }>(`/instruments/${id}/command`, { command });
 
+export const applyInstrumentSettings = (id: number, settings: InstrumentSettings) =>
+  API.post<{ ok: boolean }>(`/instruments/${id}/settings`, settings);
+
 // --- Cameras ---
 export const listCameras = () => API.get<Camera[]>("/cameras");
 export const toggleCamera = (id: number) => API.put<Camera>(`/cameras/${id}/toggle`);

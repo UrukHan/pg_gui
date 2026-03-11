@@ -32,7 +32,7 @@ services:
       ADMIN_LOGIN: "admin"
       ADMIN_PASSWORD: "admin"
       INSTRUMENTS: "TH2690-1=192.168.1.150:45454,TH2690-2=192.168.1.151:45454,TH2690-3=192.168.1.152:45454"
-      CAMERAS: "DS-H104GA=rtsp://admin:Ariadna25@192.168.1.64:554/Streaming/Channels/101"
+      CAMERAS: "CAM-1=rtsp://admin:Ariadna25@192.168.1.64:554/Streaming/Channels/101,CAM-2=rtsp://admin:Ariadna25@192.168.1.65:554/Streaming/Channels/101"
       MINIO_ENDPOINT: "127.0.0.1:9000"
       MINIO_ACCESS_KEY: "ariadna"
       MINIO_SECRET_KEY: "ariadna123"

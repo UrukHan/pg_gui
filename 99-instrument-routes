@@ -1,0 +1,10 @@
+#!/bin/bash
+# Route instrument and camera IPs through the local ethernet (enp0s31f6)
+# instead of the USB modem (enxac0033aa9633) which is the default gateway.
+if [ "$1" = "enp0s31f6" ] && [ "$2" = "up" ]; then
+    ip route replace 192.168.1.150/32 dev enp0s31f6 src 192.168.1.101 metric 99
+    ip route replace 192.168.1.151/32 dev enp0s31f6 src 192.168.1.101 metric 99
+    ip route replace 192.168.1.152/32 dev enp0s31f6 src 192.168.1.101 metric 99
+    ip route replace 192.168.1.64/32 dev enp0s31f6 src 192.168.1.101 metric 99
+    ip route replace 192.168.1.65/32 dev enp0s31f6 src 192.168.1.101 metric 99
+fi

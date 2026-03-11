@@ -76,6 +76,7 @@ func main() {
 		auth.GET("/instruments/:id/probe", controllers.ProbeInstrument)
 		auth.GET("/instruments/:id/settings", controllers.GetInstrumentSettings)
 		auth.POST("/instruments/:id/command", controllers.SendCommand)
+		auth.POST("/instruments/:id/settings", controllers.ApplySettingsEndpoint)
 		auth.PUT("/instruments/:id/toggle", controllers.ToggleInstrument)
 
 		// Cameras

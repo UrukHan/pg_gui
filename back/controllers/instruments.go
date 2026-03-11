@@ -357,6 +357,30 @@ func GetInstrumentSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, settings)
 }
 
+// ApplySettingsEndpoint applies instrument settings via SCPI in real-time
+func ApplySettingsEndpoint(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var inst models.Instrument
+	if err := database.DB.First(&inst, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	var settings scpi.InstrumentSettings
+	if err := c.ShouldBindJSON(&settings); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := scpi.ApplySettings(inst.Host, inst.Port, settings); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 // SendCommand sends an arbitrary SCPI command to an instrument
 func SendCommand(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
