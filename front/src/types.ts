@@ -36,6 +36,8 @@ export interface Experiment {
   instrument_ids: string;
   notes: string;
   settings_json: string;
+  duration_sec: number;
+  hv_schedule_json: string;
   video_path: string;
   created_at: string;
 }
@@ -56,6 +58,11 @@ export interface InstrumentSettings {
   range: string;
   frequency: number;
   zero_correct: boolean;
+}
+
+export interface HvPoint {
+  time_sec: number;
+  voltage: number;
 }
 
 export interface Measurement {

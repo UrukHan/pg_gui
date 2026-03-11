@@ -145,7 +145,9 @@ type StartExperimentRequest struct {
 	Name          string                              `json:"name" binding:"required"`
 	InstrumentIDs string                              `json:"instrument_ids" binding:"required"` // comma-separated
 	Notes         string                              `json:"notes"`
-	Settings      map[string]*scpi.InstrumentSettings `json:"settings"` // key = instrument ID
+	Settings      map[string]*scpi.InstrumentSettings `json:"settings"`     // key = instrument ID
+	DurationSec   int                                 `json:"duration_sec"` // planned duration in seconds (0 = unlimited)
+	HvSchedule    map[string][]scpi.HvPoint           `json:"hv_schedule"`  // key = instrument ID
 }
 
 func StartExperiment(c *gin.Context) {
@@ -225,15 +227,25 @@ func StartExperiment(c *gin.Context) {
 	pollingSettings := scpi.DefaultSettings()
 	pollingSettings.Frequency = maxFreq
 
+	// Serialize HV schedule
+	hvScheduleJSON := "{}"
+	if req.HvSchedule != nil {
+		if b, err := json.Marshal(req.HvSchedule); err == nil {
+			hvScheduleJSON = string(b)
+		}
+	}
+
 	now := time.Now()
 	exp := models.Experiment{
-		Name:          req.Name,
-		UserID:        user.ID,
-		Status:        models.StatusRunning,
-		StartTime:     &now,
-		InstrumentIDs: req.InstrumentIDs,
-		Notes:         req.Notes,
-		SettingsJSON:  settingsJSON,
+		Name:           req.Name,
+		UserID:         user.ID,
+		Status:         models.StatusRunning,
+		StartTime:      &now,
+		InstrumentIDs:  req.InstrumentIDs,
+		Notes:          req.Notes,
+		SettingsJSON:   settingsJSON,
+		DurationSec:    req.DurationSec,
+		HvScheduleJSON: hvScheduleJSON,
 	}
 
 	if err := database.DB.Create(&exp).Error; err != nil {

@@ -17,6 +17,12 @@ type InstrumentSettings struct {
 	ZeroCorrect bool    `json:"zero_correct"` // run zero correction before start
 }
 
+// HvPoint defines a key point in an HV voltage schedule
+type HvPoint struct {
+	TimeSec float64 `json:"time_sec"` // seconds from experiment start
+	Voltage float64 `json:"voltage"`  // target voltage at this point
+}
+
 // FrequencyToSpeed maps polling frequency to SCPI integration speed
 func FrequencyToSpeed(hz float64) string {
 	if hz >= 10 {

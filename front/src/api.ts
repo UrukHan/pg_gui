@@ -130,6 +130,8 @@ export const startExperiment = (data: {
   instrument_ids: string;
   notes: string;
   settings?: Record<string, InstrumentSettings>;
+  duration_sec?: number;
+  hv_schedule?: Record<string, { time_sec: number; voltage: number }[]>;
 }) => API.post<{ experiment: Experiment }>("/experiments/start", data);
 
 export const stopExperiment = (id: number) =>

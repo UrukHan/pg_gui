@@ -12,17 +12,19 @@ const (
 )
 
 type Experiment struct {
-	ID            uint             `gorm:"primaryKey" json:"id"`
-	Name          string           `gorm:"size:300;not null" json:"name"`
-	UserID        uint             `gorm:"not null;index" json:"user_id"`
-	User          User             `gorm:"foreignKey:UserID" json:"user,omitempty"`
-	Status        ExperimentStatus `gorm:"size:20;not null;default:stopped" json:"status"`
-	StartTime     *time.Time       `json:"start_time"`
-	EndTime       *time.Time       `json:"end_time"`
-	InstrumentIDs string           `gorm:"size:500" json:"instrument_ids"` // comma-separated IDs
-	Notes         string           `gorm:"type:text" json:"notes"`
-	SettingsJSON  string           `gorm:"type:text" json:"settings_json"` // JSON: map[instrumentId]InstrumentSettings
-	VideoPath     string           `gorm:"size:500" json:"video_path"`
-	CreatedAt     time.Time        `json:"created_at"`
-	UpdatedAt     time.Time        `json:"updated_at"`
+	ID             uint             `gorm:"primaryKey" json:"id"`
+	Name           string           `gorm:"size:300;not null" json:"name"`
+	UserID         uint             `gorm:"not null;index" json:"user_id"`
+	User           User             `gorm:"foreignKey:UserID" json:"user,omitempty"`
+	Status         ExperimentStatus `gorm:"size:20;not null;default:stopped" json:"status"`
+	StartTime      *time.Time       `json:"start_time"`
+	EndTime        *time.Time       `json:"end_time"`
+	InstrumentIDs  string           `gorm:"size:500" json:"instrument_ids"` // comma-separated IDs
+	Notes          string           `gorm:"type:text" json:"notes"`
+	SettingsJSON   string           `gorm:"type:text" json:"settings_json"`    // JSON: map[instrumentId]InstrumentSettings
+	DurationSec    int              `json:"duration_sec"`                      // planned duration in seconds (0 = unlimited)
+	HvScheduleJSON string           `gorm:"type:text" json:"hv_schedule_json"` // JSON: map[instrumentId][]HvPoint
+	VideoPath      string           `gorm:"size:500" json:"video_path"`
+	CreatedAt      time.Time        `json:"created_at"`
+	UpdatedAt      time.Time        `json:"updated_at"`
 }

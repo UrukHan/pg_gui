@@ -5,15 +5,20 @@ import {
   Box, Paper, Typography, Button, TextField, Chip, Switch,
   FormControlLabel, Checkbox, Alert, CircularProgress, Stack,
   ToggleButton, ToggleButtonGroup, Slider, Snackbar, Tabs, Tab, Fab,
+  Dialog, DialogTitle, DialogContent, DialogActions, IconButton,
+  Table, TableBody, TableCell, TableHead, TableRow, LinearProgress,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import VideocamOffIcon from '@mui/icons-material/VideocamOff';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
+import TimelineIcon from '@mui/icons-material/Timeline';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
 import {
   Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement,
-  Title, Tooltip, Legend,
+  Title, Tooltip, Legend, Filler,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import { useAuth } from '@/context/AuthContext';
@@ -21,14 +26,37 @@ import {
   listInstruments, startExperiment, stopExperiment, listExperiments,
   getExperimentStatus, getExperimentData, listCameras, applyInstrumentSettings,
 } from '@/api';
-import type { Instrument, Camera, Experiment, Measurement, InstrumentSettings } from '@/types';
+import type { Instrument, Camera, Experiment, Measurement, InstrumentSettings, HvPoint } from '@/types';
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
 const defaultSettings = (): InstrumentSettings => ({
   function: 'CURR', source_on: false, source_volt: 0,
   auto_range: true, range: '', frequency: 5, zero_correct: true,
 });
+
+function fmtTime(sec: number): string {
+  if (sec <= 0) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function interpolateSchedule(points: HvPoint[], timeSec: number): number {
+  if (!points.length) return 0;
+  if (timeSec <= points[0].time_sec) return points[0].voltage;
+  if (timeSec >= points[points.length - 1].time_sec) return points[points.length - 1].voltage;
+  for (let i = 1; i < points.length; i++) {
+    if (timeSec <= points[i].time_sec) {
+      const p0 = points[i - 1], p1 = points[i];
+      const dt = p1.time_sec - p0.time_sec;
+      if (dt <= 0) return p1.voltage;
+      const t = (timeSec - p0.time_sec) / dt;
+      return p0.voltage + t * (p1.voltage - p0.voltage);
+    }
+  }
+  return points[points.length - 1].voltage;
+}
 
 export default function InstrumentsTab() {
   const { user } = useAuth();
@@ -43,9 +71,11 @@ export default function InstrumentsTab() {
 
   const [expName, setExpName] = useState('');
   const [expNotes, setExpNotes] = useState('');
+  const [durationSec, setDurationSec] = useState(60);
   const [runningExp, setRunningExp] = useState<Experiment | null>(null);
   const [measurementCount, setMeasurementCount] = useState(0);
   const [buttonLock, setButtonLock] = useState(false);
+  const [countdown, setCountdown] = useState(0);
 
   const [settingsMap, setSettingsMap] = useState<Record<string, InstrumentSettings>>({});
   const getSettings = (id: number): InstrumentSettings => settingsMap[String(id)] || defaultSettings();
@@ -55,6 +85,17 @@ export default function InstrumentsTab() {
       [String(id)]: { ...(prev[String(id)] || defaultSettings()), ...patch },
     }));
   };
+
+  // HV schedule per instrument
+  const [hvScheduleMap, setHvScheduleMap] = useState<Record<string, HvPoint[]>>({});
+  const getSchedule = (id: number): HvPoint[] => hvScheduleMap[String(id)] || [];
+  const setSchedule = (id: number, pts: HvPoint[]) => {
+    setHvScheduleMap((prev) => ({ ...prev, [String(id)]: [...pts].sort((a, b) => a.time_sec - b.time_sec) }));
+  };
+
+  // Schedule editor dialog
+  const [scheduleInstId, setScheduleInstId] = useState<number | null>(null);
+  const [editPoints, setEditPoints] = useState<HvPoint[]>([]);
 
   const [activeCamIdx, setActiveCamIdx] = useState(0);
   const [activeChartInstIdx, setActiveChartInstIdx] = useState(0);
@@ -72,11 +113,7 @@ export default function InstrumentsTab() {
     const key = String(instId);
     if (applyTimers.current[key]) clearTimeout(applyTimers.current[key]);
     applyTimers.current[key] = setTimeout(async () => {
-      try {
-        await applyInstrumentSettings(instId, settings);
-      } catch (e: any) {
-        console.warn('[apply settings]', e.message);
-      }
+      try { await applyInstrumentSettings(instId, settings); } catch {}
     }, 800);
   }, []);
 
@@ -104,22 +141,31 @@ export default function InstrumentsTab() {
       const running = res.data.find((e: Experiment) => e.status === 'running');
       if (running) {
         setRunningExp(running);
+        if (running.duration_sec) setDurationSec(running.duration_sec);
         const st = await getExperimentStatus(running.id);
         setMeasurementCount(st.data.measurement_count);
-        // Restore settings from running experiment
-        if (running.settings_json) {
-          try {
-            const parsed = JSON.parse(running.settings_json);
-            setSettingsMap(parsed);
-          } catch {}
+        if (running.settings_json) { try { setSettingsMap(JSON.parse(running.settings_json)); } catch {} }
+        if (running.hv_schedule_json && running.hv_schedule_json !== '{}') {
+          try { setHvScheduleMap(JSON.parse(running.hv_schedule_json)); } catch {}
         }
-      } else {
-        setRunningExp(null);
-      }
+      } else { setRunningExp(null); }
     } catch {}
   }, []);
 
   useEffect(() => { loadData(); checkRunning(); }, [loadData, checkRunning]);
+
+  // Countdown timer
+  useEffect(() => {
+    if (!runningExp?.start_time || !runningExp.duration_sec) { setCountdown(0); return; }
+    const update = () => {
+      const elapsed = (Date.now() - new Date(runningExp.start_time!).getTime()) / 1000;
+      const remaining = Math.max(0, runningExp.duration_sec - elapsed);
+      setCountdown(remaining);
+    };
+    update();
+    const iv = setInterval(update, 1000);
+    return () => clearInterval(iv);
+  }, [runningExp]);
 
   useEffect(() => {
     if (!runningExp) return;
@@ -161,11 +207,19 @@ export default function InstrumentsTab() {
       for (const inst of onlineInsts) {
         settingsPayload[String(inst.id)] = getSettings(inst.id);
       }
+      // Build HV schedule payload (only for instruments that have a schedule)
+      const hvPayload: Record<string, HvPoint[]> = {};
+      for (const inst of onlineInsts) {
+        const pts = getSchedule(inst.id);
+        if (pts.length > 0) hvPayload[String(inst.id)] = pts;
+      }
       const res = await startExperiment({
         name: expName,
         instrument_ids: onlineInsts.map((i) => i.id).join(','),
         notes: expNotes,
         settings: settingsPayload,
+        duration_sec: durationSec > 0 ? durationSec : undefined,
+        hv_schedule: Object.keys(hvPayload).length > 0 ? hvPayload : undefined,
       });
       setRunningExp(res.data.experiment);
       setMeasurementCount(0);
@@ -190,7 +244,50 @@ export default function InstrumentsTab() {
     } finally { setButtonLock(false); }
   };
 
-  // --- Chart data ---
+  // --- Schedule editor helpers ---
+  const openScheduleEditor = (instId: number) => {
+    setScheduleInstId(instId);
+    setEditPoints([...getSchedule(instId)]);
+  };
+  const addSchedulePoint = () => {
+    const last = editPoints[editPoints.length - 1];
+    setEditPoints([...editPoints, { time_sec: last ? last.time_sec + 10 : 0, voltage: last ? last.voltage : 0 }]);
+  };
+  const removeSchedulePoint = (idx: number) => {
+    setEditPoints(editPoints.filter((_, i) => i !== idx));
+  };
+  const updateSchedulePoint = (idx: number, field: 'time_sec' | 'voltage', value: number) => {
+    setEditPoints(editPoints.map((p, i) => i === idx ? { ...p, [field]: value } : p));
+  };
+  const saveSchedule = () => {
+    if (scheduleInstId !== null) {
+      setSchedule(scheduleInstId, editPoints);
+    }
+    setScheduleInstId(null);
+  };
+
+  // Schedule preview chart data
+  const schedulePreviewData = useMemo(() => {
+    if (!editPoints.length) return null;
+    const sorted = [...editPoints].sort((a, b) => a.time_sec - b.time_sec);
+    const labels: number[] = [];
+    const data: number[] = [];
+    const maxT = Math.max(sorted[sorted.length - 1]?.time_sec || 0, durationSec);
+    for (let t = 0; t <= maxT; t += Math.max(1, Math.floor(maxT / 100))) {
+      labels.push(t);
+      data.push(interpolateSchedule(sorted, t));
+    }
+    return {
+      labels: labels.map((t) => fmtTime(t)),
+      datasets: [{
+        label: 'HV (В)', data,
+        borderColor: '#f44336', backgroundColor: 'rgba(244,67,54,0.1)',
+        borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true,
+      }],
+    };
+  }, [editPoints, durationSec]);
+
+  // --- Live chart data ---
   const chartInstId = onlineInsts[activeChartInstIdx]?.id;
   const instMeasurements = useMemo(() =>
     liveMeasurements.filter((m) => m.instrument_id === chartInstId).slice(-100),
@@ -201,15 +298,33 @@ export default function InstrumentsTab() {
       new Date(m.recorded_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     ), [instMeasurements]
   );
-  const voltageData = useMemo(() => ({
-    labels: chartLabels,
-    datasets: [{
-      label: 'Напряжение (В)',
+
+  // Voltage chart with planned schedule overlay
+  const voltageData = useMemo(() => {
+    const datasets: any[] = [{
+      label: 'Факт (В)',
       data: instMeasurements.map((m) => m.source),
       borderColor: '#f44336', backgroundColor: 'rgba(244,67,54,0.08)',
       borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true,
-    }],
-  }), [chartLabels, instMeasurements]);
+    }];
+    // Add planned schedule as dashed line
+    if (chartInstId && runningExp?.start_time) {
+      const pts = getSchedule(chartInstId);
+      if (pts.length > 0) {
+        const startMs = new Date(runningExp.start_time).getTime();
+        datasets.push({
+          label: 'План (В)',
+          data: instMeasurements.map((m) => {
+            const elapsedSec = (new Date(m.recorded_at).getTime() - startMs) / 1000;
+            return interpolateSchedule(pts, elapsedSec);
+          }),
+          borderColor: '#ff9800', borderDash: [6, 3],
+          borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: false,
+        });
+      }
+    }
+    return { labels: chartLabels, datasets };
+  }, [chartLabels, instMeasurements, chartInstId, runningExp, hvScheduleMap]);
 
   const paramData = useMemo(() => {
     const s = chartInstId ? getSettings(chartInstId) : defaultSettings();
@@ -218,8 +333,7 @@ export default function InstrumentsTab() {
     return {
       labels: chartLabels,
       datasets: [{
-        label,
-        data: instMeasurements.map((m) => (m as any)[key]),
+        label, data: instMeasurements.map((m) => (m as any)[key]),
         borderColor: '#2196f3', backgroundColor: 'rgba(33,150,243,0.08)',
         borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true,
       }],
@@ -236,8 +350,20 @@ export default function InstrumentsTab() {
     },
   }), []);
 
+  const chartOptsWithLegend: any = useMemo(() => ({
+    ...chartOpts,
+    plugins: { legend: { display: true, position: 'top' as const, labels: { boxWidth: 12, font: { size: 9 } } } },
+  }), [chartOpts]);
+
   // --- Render ---
   if (loading) return <Box sx={{ p: 4, textAlign: 'center' }}><CircularProgress /></Box>;
+
+  const elapsedSec = runningExp?.start_time
+    ? (Date.now() - new Date(runningExp.start_time).getTime()) / 1000
+    : 0;
+  const progress = runningExp?.duration_sec
+    ? Math.min(100, (elapsedSec / runningExp.duration_sec) * 100)
+    : 0;
 
   return (
     <Box sx={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -260,12 +386,14 @@ export default function InstrumentsTab() {
           <Paper elevation={6} sx={{ p: 4, textAlign: 'center', borderRadius: 3, maxWidth: 400 }}>
             <FiberManualRecordIcon sx={{ fontSize: 16, color: 'error.main', mr: 0.5, animation: 'pulse 1.5s infinite' }} />
             <Typography variant="h6" fontWeight={700} gutterBottom>Идёт эксперимент</Typography>
-            <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-              {runningExp?.name}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            <Typography variant="body1" color="text.secondary">{runningExp?.name}</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Измерений: {measurementCount}
+              {runningExp?.duration_sec ? ` | Осталось: ${fmtTime(countdown)}` : ''}
             </Typography>
+            {runningExp?.duration_sec ? (
+              <LinearProgress variant="determinate" value={progress} sx={{ mb: 2, borderRadius: 1 }} />
+            ) : null}
             {hasAccess && (
               <Fab color="error" onClick={handleStop} disabled={buttonLock}
                 sx={{ width: 72, height: 72, boxShadow: '0 4px 20px rgba(244,67,54,0.4)' }}>
@@ -285,31 +413,53 @@ export default function InstrumentsTab() {
         {/* ===== TOP HALF ===== */}
         <Box sx={{ flex: 1, display: 'grid', gridTemplateColumns: { xs: '1fr', md: '260px 1fr 1fr' }, gap: 1, p: 0.5, minHeight: 0 }}>
 
-          {/* COL 1: Name, Notes, Cameras, Start/Stop */}
+          {/* COL 1: Name, Notes, Duration, Cameras, Start/Stop */}
           <Paper variant="outlined" sx={{ p: 1.5, display: 'flex', flexDirection: 'column', gap: 1, overflow: 'auto' }}>
             {!runningExp ? (
               <>
                 <TextField label="Название" value={expName} onChange={(e) => setExpName(e.target.value)}
                   size="small" fullWidth />
                 <TextField label="Заметки" value={expNotes} onChange={(e) => setExpNotes(e.target.value)}
-                  size="small" fullWidth multiline rows={2} />
+                  size="small" fullWidth multiline rows={1} />
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <TextField label="Длительность" type="number" size="small"
+                    value={durationSec} sx={{ width: 110 }}
+                    onChange={(e) => { let v = Number(e.target.value); if (v < 0) v = 0; setDurationSec(v); }}
+                    inputProps={{ min: 0, step: 10 }}
+                    helperText={durationSec > 0 ? fmtTime(durationSec) : '∞'}
+                  />
+                  <Typography variant="caption" color="text.secondary">сек</Typography>
+                </Stack>
               </>
             ) : (
               <Box>
                 <Typography variant="subtitle1" fontWeight={700} color="success.main">{runningExp.name}</Typography>
                 {runningExp.notes && (
-                  <Typography variant="caption" color="text.secondary">{runningExp.notes}</Typography>
+                  <Typography variant="caption" color="text.secondary" display="block">{runningExp.notes}</Typography>
                 )}
                 <Typography variant="body2" sx={{ mt: 0.5 }}>
                   Измерений: <b>{measurementCount}</b>
                 </Typography>
+                {runningExp.duration_sec > 0 && (
+                  <Box sx={{ mt: 0.5 }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Typography variant="caption" color="text.secondary">
+                        {fmtTime(elapsedSec)} / {fmtTime(runningExp.duration_sec)}
+                      </Typography>
+                      <Typography variant="caption" fontWeight={700}
+                        color={countdown < 10 ? 'error.main' : 'text.secondary'}>
+                        Осталось: {fmtTime(countdown)}
+                      </Typography>
+                    </Stack>
+                    <LinearProgress variant="determinate" value={progress}
+                      sx={{ mt: 0.3, borderRadius: 1, height: 6 }} />
+                  </Box>
+                )}
               </Box>
             )}
 
             <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ mt: 0.5 }}>Камеры</Typography>
-            {cameras.length === 0 && (
-              <Typography variant="caption" color="text.disabled">Нет камер</Typography>
-            )}
+            {cameras.length === 0 && <Typography variant="caption" color="text.disabled">Нет камер</Typography>}
             {cameras.map((cam) => (
               <Stack key={cam.id} direction="row" alignItems="center" spacing={0.5}>
                 <VideocamIcon sx={{ fontSize: 18, color: cam.active ? 'success.main' : 'text.disabled' }} />
@@ -357,12 +507,8 @@ export default function InstrumentsTab() {
               {cameras.length > 0 && cameras[activeCamIdx]?.online ? (
                 <Stack alignItems="center" spacing={0.5}>
                   <VideocamIcon sx={{ fontSize: 48, color: '#444' }} />
-                  <Typography variant="caption" color="#888">
-                    {cameras[activeCamIdx]?.name}
-                  </Typography>
-                  <Typography variant="caption" color="#555">
-                    Трансляция (placeholder)
-                  </Typography>
+                  <Typography variant="caption" color="#888">{cameras[activeCamIdx]?.name}</Typography>
+                  <Typography variant="caption" color="#555">Трансляция (placeholder)</Typography>
                 </Stack>
               ) : (
                 <Stack alignItems="center" spacing={0.5}>
@@ -391,7 +537,8 @@ export default function InstrumentsTab() {
               </Typography>
               <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
                 {instMeasurements.length > 0 ? (
-                  <Line data={voltageData} options={chartOpts} />
+                  <Line data={voltageData}
+                    options={chartInstId && getSchedule(chartInstId).length > 0 ? chartOptsWithLegend : chartOpts} />
                 ) : (
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                     <Typography variant="caption" color="text.disabled">
@@ -429,12 +576,9 @@ export default function InstrumentsTab() {
         }}>
           {allInsts.slice(0, 3).map((inst) => {
             const s = getSettings(inst.id);
+            const schedule = getSchedule(inst.id);
             const upd = (patch: Partial<InstrumentSettings>) => {
-              if (runningExp) {
-                updateAndApply(inst.id, patch);
-              } else {
-                updateSettings(inst.id, patch);
-              }
+              if (runningExp) { updateAndApply(inst.id, patch); } else { updateSettings(inst.id, patch); }
             };
             const disabled = !inst.online || isOtherRunning;
             return (
@@ -446,11 +590,25 @@ export default function InstrumentsTab() {
                   <Typography variant="subtitle2" fontWeight={700} noWrap>
                     {inst.model || inst.name}
                   </Typography>
-                  <Chip label={inst.online ? 'Online' : 'Offline'} size="small"
-                    color={inst.online ? 'success' : 'error'}
-                    variant={inst.online ? 'filled' : 'outlined'}
-                    sx={{ height: 22 }} />
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <IconButton size="small" disabled={disabled || !!runningExp}
+                      onClick={() => openScheduleEditor(inst.id)}
+                      title="Расписание HV"
+                      sx={{ color: schedule.length > 0 ? 'warning.main' : 'text.disabled' }}>
+                      <TimelineIcon fontSize="small" />
+                    </IconButton>
+                    <Chip label={inst.online ? 'Online' : 'Offline'} size="small"
+                      color={inst.online ? 'success' : 'error'}
+                      variant={inst.online ? 'filled' : 'outlined'}
+                      sx={{ height: 22 }} />
+                  </Stack>
                 </Stack>
+
+                {schedule.length > 0 && (
+                  <Chip label={`HV расписание: ${schedule.length} точек`}
+                    size="small" color="warning" variant="outlined"
+                    sx={{ mb: 0.5, alignSelf: 'flex-start', height: 20, fontSize: '0.65rem' }} />
+                )}
 
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 0.3 }}>Режим измерения</Typography>
                 <ToggleButtonGroup value={s.function} exclusive size="small" fullWidth disabled={disabled}
@@ -505,7 +663,76 @@ export default function InstrumentsTab() {
         </Box>
       </Box>
 
-      {/* Pulse animation for recording indicator */}
+      {/* ===== HV Schedule Editor Dialog ===== */}
+      <Dialog open={scheduleInstId !== null} onClose={() => setScheduleInstId(null)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <TimelineIcon color="warning" />
+          Расписание HV — {scheduleInstId !== null && (instruments.find((i) => i.id === scheduleInstId)?.model || `#${scheduleInstId}`)}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Задайте ключевые точки изменения напряжения. Между точками значение интерполируется линейно.
+            Длительность эксперимента: <b>{fmtTime(durationSec)}</b>
+          </Typography>
+          <Table size="small" sx={{ mb: 2 }}>
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ fontWeight: 700, width: 120 }}>Время (сек)</TableCell>
+                <TableCell sx={{ fontWeight: 700, width: 120 }}>Напряжение (В)</TableCell>
+                <TableCell sx={{ width: 50 }} />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {editPoints.map((pt, idx) => (
+                <TableRow key={idx}>
+                  <TableCell>
+                    <TextField type="number" size="small" value={pt.time_sec}
+                      onChange={(e) => updateSchedulePoint(idx, 'time_sec', Number(e.target.value))}
+                      inputProps={{ min: 0, max: durationSec || 9999, step: 1 }}
+                      sx={{ width: 100 }} />
+                  </TableCell>
+                  <TableCell>
+                    <TextField type="number" size="small" value={pt.voltage}
+                      onChange={(e) => updateSchedulePoint(idx, 'voltage', Number(e.target.value))}
+                      inputProps={{ min: -1000, max: 1000, step: 1 }}
+                      sx={{ width: 100 }} />
+                  </TableCell>
+                  <TableCell>
+                    <IconButton size="small" onClick={() => removeSchedulePoint(idx)} color="error">
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Button startIcon={<AddIcon />} onClick={addSchedulePoint} size="small" variant="outlined">
+            Добавить точку
+          </Button>
+
+          {schedulePreviewData && (
+            <Box sx={{ mt: 2, height: 160 }}>
+              <Typography variant="caption" fontWeight={600} color="text.secondary">Превью</Typography>
+              <Line data={schedulePreviewData} options={{
+                responsive: true, maintainAspectRatio: false,
+                animation: false as const,
+                plugins: { legend: { display: false } },
+                scales: {
+                  x: { display: true, ticks: { maxTicksLimit: 6, font: { size: 9 } } },
+                  y: { display: true, ticks: { font: { size: 9 } } },
+                },
+              }} />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setScheduleInstId(null)}>Отмена</Button>
+          <Button onClick={() => { if (scheduleInstId) setSchedule(scheduleInstId, []); setScheduleInstId(null); }}
+            color="warning">Очистить</Button>
+          <Button onClick={saveSchedule} variant="contained">Сохранить</Button>
+        </DialogActions>
+      </Dialog>
+
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; }
