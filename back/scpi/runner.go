@@ -171,7 +171,7 @@ func (r *Runner) poll(experimentID uint, instruments []models.Instrument, interv
 		deadlineC = time.After(duration)
 	}
 
-	// One persistent connection per instrument
+	// One persistent connection per instrument (each goroutine uses its own — no sharing)
 	conns := make(map[uint]*persistentConn, len(instruments))
 	for _, inst := range instruments {
 		conns[inst.ID] = newPersistentConn(inst.Host, inst.Port)
@@ -183,6 +183,7 @@ func (r *Runner) poll(experimentID uint, instruments []models.Instrument, interv
 	}()
 
 	// Track last applied HV per instrument to avoid redundant commands
+	// Each entry is only accessed by a single goroutine (per instrument), so no mutex needed
 	lastHV := make(map[uint]float64)
 	for _, inst := range instruments {
 		lastHV[inst.ID] = math.NaN()
@@ -201,72 +202,81 @@ func (r *Runner) poll(experimentID uint, instruments []models.Instrument, interv
 			now := time.Now()
 			database.DB.Model(&models.Experiment{}).Where("id = ?", experimentID).
 				Updates(map[string]interface{}{"status": models.StatusCompleted, "end_time": now})
-			// Turn off instruments
+			// Turn off instruments in parallel
+			var stopWg sync.WaitGroup
 			for _, inst := range instruments {
-				Stop(inst.Host, inst.Port)
-				Send(inst.Host, inst.Port, "FUNC:SRC OFF", 2*time.Second)
-				Send(inst.Host, inst.Port, "FUNC:AMMET OFF", 2*time.Second)
+				stopWg.Add(1)
+				go func(inst models.Instrument) {
+					defer stopWg.Done()
+					Stop(inst.Host, inst.Port)
+					Send(inst.Host, inst.Port, "FUNC:SRC OFF", 2*time.Second)
+					Send(inst.Host, inst.Port, "FUNC:AMMET OFF", 2*time.Second)
+				}(inst)
 			}
+			stopWg.Wait()
 			return
 		case <-ticker.C:
 			elapsed := time.Since(start).Seconds()
 
-			// Apply HV schedule changes
+			// Poll all instruments in parallel
+			var wg sync.WaitGroup
 			for _, inst := range instruments {
-				points, ok := hvSchedule[inst.ID]
-				if !ok || len(points) == 0 {
-					continue
-				}
-				targetV := interpolateHV(points, elapsed)
-				prev := lastHV[inst.ID]
-				// Apply only if changed by >= 0.1V
-				if math.IsNaN(prev) || math.Abs(targetV-prev) >= 0.1 {
+				wg.Add(1)
+				go func(inst models.Instrument) {
+					defer wg.Done()
 					pc := conns[inst.ID]
-					pc.sendCmd(fmt.Sprintf("SRC:VALUE %.3f", targetV), defaultTimeout)
-					lastHV[inst.ID] = targetV
-					if count%20 == 0 {
-						log.Printf("[SCPI] exp=%d inst=%d HV schedule -> %.1fV", experimentID, inst.ID, targetV)
+
+					// Apply HV schedule if needed
+					if points, ok := hvSchedule[inst.ID]; ok && len(points) > 0 {
+						targetV := interpolateHV(points, elapsed)
+						prev := lastHV[inst.ID]
+						if math.IsNaN(prev) || math.Abs(targetV-prev) >= 0.1 {
+							pc.sendCmd(fmt.Sprintf("SRC:VALUE %.3f", targetV), defaultTimeout)
+							lastHV[inst.ID] = targetV
+							if count%20 == 0 {
+								log.Printf("[SCPI] exp=%d inst=%d HV schedule -> %.1fV", experimentID, inst.ID, targetV)
+							}
+						}
 					}
-				}
+
+					// Fetch measurements
+					rawResp, rawErr := pc.sendCmd("FETCH:ALL_S?", defaultTimeout)
+					if rawErr != nil {
+						if count%10 == 0 {
+							log.Printf("[SCPI] exp=%d inst=%d fetch error (x10): %v", experimentID, inst.ID, rawErr)
+						}
+						return
+					}
+					resp, err := ParseAllS(rawResp)
+					if err != nil {
+						if count%10 == 0 {
+							log.Printf("[SCPI] exp=%d inst=%d parse error (x10): %v", experimentID, inst.ID, err)
+						}
+						return
+					}
+
+					m := models.Measurement{
+						ExperimentID: experimentID,
+						InstrumentID: inst.ID,
+						DeviceTime:   resp.DeviceTime,
+						RecordedAt:   time.Now(),
+						Voltage:      resp.Voltage,
+						Current:      resp.Current,
+						Charge:       resp.Charge,
+						Resistance:   resp.Resistance,
+						Temperature:  resp.Temperature,
+						Humidity:     resp.Humidity,
+						Source:       resp.Source,
+						MathValue:    resp.MathValue,
+						ErrorCode:    resp.ErrorCode,
+					}
+
+					if err := database.DB.Create(&m).Error; err != nil {
+						log.Printf("[SCPI] exp=%d inst=%d save error: %v", experimentID, inst.ID, err)
+					}
+				}(inst)
 			}
-
-			for _, inst := range instruments {
-				pc := conns[inst.ID]
-				rawResp, rawErr := pc.sendCmd("FETCH:ALL_S?", defaultTimeout)
-				if rawErr != nil {
-					if count%10 == 0 {
-						log.Printf("[SCPI] exp=%d inst=%d fetch error (x10): %v", experimentID, inst.ID, rawErr)
-					}
-					continue
-				}
-				resp, err := ParseAllS(rawResp)
-				if err != nil {
-					if count%10 == 0 {
-						log.Printf("[SCPI] exp=%d inst=%d parse error (x10): %v", experimentID, inst.ID, err)
-					}
-					continue
-				}
-
-				m := models.Measurement{
-					ExperimentID: experimentID,
-					InstrumentID: inst.ID,
-					DeviceTime:   resp.DeviceTime,
-					RecordedAt:   time.Now(),
-					Voltage:      resp.Voltage,
-					Current:      resp.Current,
-					Charge:       resp.Charge,
-					Resistance:   resp.Resistance,
-					Temperature:  resp.Temperature,
-					Humidity:     resp.Humidity,
-					Source:       resp.Source,
-					MathValue:    resp.MathValue,
-					ErrorCode:    resp.ErrorCode,
-				}
-
-				if err := database.DB.Create(&m).Error; err != nil {
-					log.Printf("[SCPI] exp=%d save error: %v", experimentID, err)
-				}
-			}
+			wg.Wait()
 			count++
 			if count%100 == 0 {
 				log.Printf("[SCPI] exp=%d polls=%d OK elapsed=%.0fs", experimentID, count, elapsed)

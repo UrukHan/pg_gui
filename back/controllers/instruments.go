@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -188,8 +189,9 @@ func StartExperiment(c *gin.Context) {
 		instruments = append(instruments, inst)
 	}
 
-	// Apply per-instrument settings (or defaults)
+	// Apply per-instrument settings in parallel
 	var maxFreq float64 = 5
+	settingsPerInst := make(map[uint]scpi.InstrumentSettings, len(instruments))
 	for _, inst := range instruments {
 		idStr := strconv.Itoa(int(inst.ID))
 		settings := scpi.DefaultSettings()
@@ -201,18 +203,51 @@ func StartExperiment(c *gin.Context) {
 		if settings.Frequency > maxFreq {
 			maxFreq = settings.Frequency
 		}
-		if err := scpi.ApplySettings(inst.Host, inst.Port, settings); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("failed to configure %s: %v", inst.Name, err)})
-			return
-		}
+		settingsPerInst[inst.ID] = settings
 	}
 
-	// Send FUNC:RUN to all instruments
+	var applyWg sync.WaitGroup
+	var applyMu sync.Mutex
+	var applyErr error
 	for _, inst := range instruments {
-		if err := scpi.Run(inst.Host, inst.Port); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("failed to start %s: %v", inst.Name, err)})
-			return
-		}
+		applyWg.Add(1)
+		go func(inst models.Instrument, s scpi.InstrumentSettings) {
+			defer applyWg.Done()
+			if err := scpi.ApplySettings(inst.Host, inst.Port, s); err != nil {
+				applyMu.Lock()
+				if applyErr == nil {
+					applyErr = fmt.Errorf("failed to configure %s: %v", inst.Name, err)
+				}
+				applyMu.Unlock()
+			}
+		}(inst, settingsPerInst[inst.ID])
+	}
+	applyWg.Wait()
+	if applyErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": applyErr.Error()})
+		return
+	}
+
+	// Send FUNC:RUN to all instruments in parallel
+	var runWg sync.WaitGroup
+	var runErr error
+	for _, inst := range instruments {
+		runWg.Add(1)
+		go func(inst models.Instrument) {
+			defer runWg.Done()
+			if err := scpi.Run(inst.Host, inst.Port); err != nil {
+				applyMu.Lock()
+				if runErr == nil {
+					runErr = fmt.Errorf("failed to start %s: %v", inst.Name, err)
+				}
+				applyMu.Unlock()
+			}
+		}(inst)
+	}
+	runWg.Wait()
+	if runErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": runErr.Error()})
+		return
 	}
 
 	// Serialize settings to JSON for storage
@@ -297,18 +332,23 @@ func StopExperiment(c *gin.Context) {
 	// Stop polling
 	scpi.DefaultRunner.Stop(exp.ID)
 
-	// Stop instruments and reset to safe state
+	// Stop instruments and reset to safe state — in parallel
 	idStrs := strings.Split(exp.InstrumentIDs, ",")
+	var stopWg sync.WaitGroup
 	for _, s := range idStrs {
 		instID, _ := strconv.Atoi(strings.TrimSpace(s))
 		var inst models.Instrument
 		if database.DB.First(&inst, instID).Error == nil {
-			scpi.Stop(inst.Host, inst.Port)
-			// Turn off source and ammeter for safety
-			scpi.Send(inst.Host, inst.Port, "FUNC:SRC OFF", 2*time.Second)
-			scpi.Send(inst.Host, inst.Port, "FUNC:AMMET OFF", 2*time.Second)
+			stopWg.Add(1)
+			go func(inst models.Instrument) {
+				defer stopWg.Done()
+				scpi.Stop(inst.Host, inst.Port)
+				scpi.Send(inst.Host, inst.Port, "FUNC:SRC OFF", 2*time.Second)
+				scpi.Send(inst.Host, inst.Port, "FUNC:AMMET OFF", 2*time.Second)
+			}(inst)
 		}
 	}
+	stopWg.Wait()
 
 	// Stop video recording and upload
 	if videoPath := recorder.Default.Stop(exp.ID); videoPath != "" {
