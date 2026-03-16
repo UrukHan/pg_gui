@@ -159,6 +159,14 @@ func interpolateHV(points []HvPoint, elapsedSec float64) float64 {
 	return points[len(points)-1].Voltage
 }
 
+// instState holds per-instrument state for polling — each goroutine owns exactly one, no sharing
+type instState struct {
+	inst   models.Instrument
+	pc     *persistentConn
+	hvPts  []HvPoint
+	lastHV float64
+}
+
 func (r *Runner) poll(experimentID uint, instruments []models.Instrument, interval time.Duration, cancel chan struct{}, duration time.Duration, hvSchedule map[uint][]HvPoint) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -171,23 +179,21 @@ func (r *Runner) poll(experimentID uint, instruments []models.Instrument, interv
 		deadlineC = time.After(duration)
 	}
 
-	// One persistent connection per instrument (each goroutine uses its own — no sharing)
-	conns := make(map[uint]*persistentConn, len(instruments))
-	for _, inst := range instruments {
-		conns[inst.ID] = newPersistentConn(inst.Host, inst.Port)
+	// Per-instrument state — slice indexed by position, no shared maps
+	states := make([]instState, len(instruments))
+	for i, inst := range instruments {
+		states[i] = instState{
+			inst:   inst,
+			pc:     newPersistentConn(inst.Host, inst.Port),
+			hvPts:  hvSchedule[inst.ID],
+			lastHV: math.NaN(),
+		}
 	}
 	defer func() {
-		for _, pc := range conns {
-			pc.close()
+		for i := range states {
+			states[i].pc.close()
 		}
 	}()
-
-	// Track last applied HV per instrument to avoid redundant commands
-	// Each entry is only accessed by a single goroutine (per instrument), so no mutex needed
-	lastHV := make(map[uint]float64)
-	for _, inst := range instruments {
-		lastHV[inst.ID] = math.NaN()
-	}
 
 	var count int64
 	for {
@@ -204,60 +210,58 @@ func (r *Runner) poll(experimentID uint, instruments []models.Instrument, interv
 				Updates(map[string]interface{}{"status": models.StatusCompleted, "end_time": now})
 			// Turn off instruments in parallel
 			var stopWg sync.WaitGroup
-			for _, inst := range instruments {
+			for i := range states {
 				stopWg.Add(1)
-				go func(inst models.Instrument) {
+				go func(s *instState) {
 					defer stopWg.Done()
-					Stop(inst.Host, inst.Port)
-					Send(inst.Host, inst.Port, "FUNC:SRC OFF", 2*time.Second)
-					Send(inst.Host, inst.Port, "FUNC:AMMET OFF", 2*time.Second)
-				}(inst)
+					Stop(s.inst.Host, s.inst.Port)
+					Send(s.inst.Host, s.inst.Port, "FUNC:SRC OFF", 2*time.Second)
+					Send(s.inst.Host, s.inst.Port, "FUNC:AMMET OFF", 2*time.Second)
+				}(&states[i])
 			}
 			stopWg.Wait()
 			return
 		case <-ticker.C:
 			elapsed := time.Since(start).Seconds()
 
-			// Poll all instruments in parallel
+			// Poll all instruments in parallel — each goroutine owns its own *instState
 			var wg sync.WaitGroup
-			for _, inst := range instruments {
+			for i := range states {
 				wg.Add(1)
-				go func(inst models.Instrument) {
+				go func(s *instState) {
 					defer wg.Done()
-					pc := conns[inst.ID]
 
 					// Apply HV schedule if needed
-					if points, ok := hvSchedule[inst.ID]; ok && len(points) > 0 {
-						targetV := interpolateHV(points, elapsed)
-						prev := lastHV[inst.ID]
-						if math.IsNaN(prev) || math.Abs(targetV-prev) >= 0.1 {
-							pc.sendCmd(fmt.Sprintf("SRC:VALUE %.3f", targetV), defaultTimeout)
-							lastHV[inst.ID] = targetV
+					if len(s.hvPts) > 0 {
+						targetV := interpolateHV(s.hvPts, elapsed)
+						if math.IsNaN(s.lastHV) || math.Abs(targetV-s.lastHV) >= 0.1 {
+							s.pc.sendCmd(fmt.Sprintf("SRC:VALUE %.3f", targetV), defaultTimeout)
+							s.lastHV = targetV
 							if count%20 == 0 {
-								log.Printf("[SCPI] exp=%d inst=%d HV schedule -> %.1fV", experimentID, inst.ID, targetV)
+								log.Printf("[SCPI] exp=%d inst=%d HV schedule -> %.1fV", experimentID, s.inst.ID, targetV)
 							}
 						}
 					}
 
 					// Fetch measurements
-					rawResp, rawErr := pc.sendCmd("FETCH:ALL_S?", defaultTimeout)
+					rawResp, rawErr := s.pc.sendCmd("FETCH:ALL_S?", defaultTimeout)
 					if rawErr != nil {
 						if count%10 == 0 {
-							log.Printf("[SCPI] exp=%d inst=%d fetch error (x10): %v", experimentID, inst.ID, rawErr)
+							log.Printf("[SCPI] exp=%d inst=%d fetch error (x10): %v", experimentID, s.inst.ID, rawErr)
 						}
 						return
 					}
 					resp, err := ParseAllS(rawResp)
 					if err != nil {
 						if count%10 == 0 {
-							log.Printf("[SCPI] exp=%d inst=%d parse error (x10): %v", experimentID, inst.ID, err)
+							log.Printf("[SCPI] exp=%d inst=%d parse error (x10): %v", experimentID, s.inst.ID, err)
 						}
 						return
 					}
 
 					m := models.Measurement{
 						ExperimentID: experimentID,
-						InstrumentID: inst.ID,
+						InstrumentID: s.inst.ID,
 						DeviceTime:   resp.DeviceTime,
 						RecordedAt:   time.Now(),
 						Voltage:      resp.Voltage,
@@ -272,9 +276,9 @@ func (r *Runner) poll(experimentID uint, instruments []models.Instrument, interv
 					}
 
 					if err := database.DB.Create(&m).Error; err != nil {
-						log.Printf("[SCPI] exp=%d inst=%d save error: %v", experimentID, inst.ID, err)
+						log.Printf("[SCPI] exp=%d inst=%d save error: %v", experimentID, s.inst.ID, err)
 					}
-				}(inst)
+				}(&states[i])
 			}
 			wg.Wait()
 			count++
