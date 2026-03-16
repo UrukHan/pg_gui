@@ -99,7 +99,6 @@ export default function InstrumentsTab() {
   const [scheduleMode, setScheduleMode] = useState<'linear' | 'stepped'>('linear');
   // Stepped mode params
   const [stepStartV, setStepStartV] = useState(0);
-  const [stepEndV, setStepEndV] = useState(100);
   const [stepDeltaV, setStepDeltaV] = useState(10);
   const [stepDeltaSec, setStepDeltaSec] = useState(5);
   const [stepCount, setStepCount] = useState(10);
@@ -271,33 +270,25 @@ export default function InstrumentsTab() {
     setScheduleMode('linear');
   };
 
-  // Generate stepped points from params
+  // Generate stepped points from params (End V = Start V + Step V * Count)
   const generateSteppedPoints = () => {
     const pts: HvPoint[] = [];
-    const direction = stepEndV >= stepStartV ? 1 : -1;
-    const absDeltaV = Math.abs(stepDeltaV) || 1;
-    const actualDeltaV = absDeltaV * direction;
     let v = stepStartV;
     let t = 0;
+    const endV = stepStartV + stepDeltaV * stepCount;
     for (let i = 0; i < stepCount; i++) {
-      // Clamp voltage to HV limits
       const clamped = Math.max(-1000, Math.min(1000, v));
       pts.push({ time_sec: t, voltage: clamped });
-      // Hold at this voltage for stepDeltaSec (add end-of-hold point)
       pts.push({ time_sec: t + stepDeltaSec - 0.01, voltage: clamped });
       t += stepDeltaSec;
-      v += actualDeltaV;
-      // Check if we've passed the end voltage
-      if (direction > 0 && v > stepEndV) v = stepEndV;
-      if (direction < 0 && v < stepEndV) v = stepEndV;
+      v += stepDeltaV;
     }
-    // Check warnings
     const totalTime = stepCount * stepDeltaSec;
-    const maxV = Math.max(Math.abs(stepStartV), Math.abs(stepEndV));
+    const maxAbsV = Math.max(Math.abs(stepStartV), Math.abs(endV));
     const warnings: string[] = [];
     if (durationSec > 0 && totalTime > durationSec) warnings.push(`\u0412\u0440\u0435\u043c\u044f ${totalTime}\u0441 > \u0434\u043b\u0438\u0442\u0435\u043b\u044c\u043d\u043e\u0441\u0442\u044c ${durationSec}\u0441`);
-    if (maxV > 1000) warnings.push('\u041d\u0430\u043f\u0440\u044f\u0436\u0435\u043d\u0438\u0435 \u043f\u0440\u0435\u0432\u044b\u0448\u0430\u0435\u0442 \u043f\u0440\u0435\u0434\u0435\u043b \u00b11000\u0412');
-    return { pts, warnings, totalTime };
+    if (maxAbsV > 1000) warnings.push(`\u041d\u0430\u043f\u0440\u044f\u0436\u0435\u043d\u0438\u0435 \u0434\u043e\u0441\u0442\u0438\u0433\u0430\u0435\u0442 ${endV}\u0412 (\u043f\u0440\u0435\u0434\u0435\u043b \u00b11000\u0412)`);
+    return { pts, warnings, totalTime, endV };
   };
   const removeSchedulePoint = (idx: number) => {
     setEditPoints(editPoints.filter((_, i) => i !== idx));
@@ -788,30 +779,25 @@ export default function InstrumentsTab() {
               </Typography>
               <Stack spacing={1.5}>
                 <Stack direction="row" spacing={1}>
-                  <TextField label="Start V" type="number" size="small" value={stepStartV}
+                  <TextField label="Старт (В)" type="number" size="small" value={stepStartV}
                     onChange={(e) => setStepStartV(Number(e.target.value))}
                     inputProps={{ min: -1000, max: 1000, step: 1 }} sx={{ flex: 1 }} />
-                  <TextField label="End V" type="number" size="small" value={stepEndV}
-                    onChange={(e) => setStepEndV(Number(e.target.value))}
-                    inputProps={{ min: -1000, max: 1000, step: 1 }} sx={{ flex: 1 }} />
-                </Stack>
-                <Stack direction="row" spacing={1}>
                   <TextField label="Шаг (В)" type="number" size="small" value={stepDeltaV}
-                    onChange={(e) => { let v = Number(e.target.value); if (v < 1) v = 1; setStepDeltaV(v); }}
-                    inputProps={{ min: 1, max: 2000, step: 1 }} sx={{ flex: 1 }} />
+                    onChange={(e) => setStepDeltaV(Number(e.target.value))}
+                    inputProps={{ min: -2000, max: 2000, step: 1 }} sx={{ flex: 1 }} />
                   <TextField label="Шаг (сек)" type="number" size="small" value={stepDeltaSec}
                     onChange={(e) => { let v = Number(e.target.value); if (v < 1) v = 1; setStepDeltaSec(v); }}
                     inputProps={{ min: 1, max: 9999, step: 1 }} sx={{ flex: 1 }} />
-                  <TextField label="Кол-во шагов" type="number" size="small" value={stepCount}
+                  <TextField label="Кол-во" type="number" size="small" value={stepCount}
                     onChange={(e) => { let v = Number(e.target.value); if (v < 1) v = 1; if (v > 200) v = 200; setStepCount(v); }}
                     inputProps={{ min: 1, max: 200, step: 1 }} sx={{ flex: 1 }} />
                 </Stack>
                 {(() => {
-                  const { warnings, totalTime } = generateSteppedPoints();
+                  const { warnings, totalTime, endV } = generateSteppedPoints();
                   return (
                     <>
                       <Typography variant="caption" color="text.secondary">
-                        Итого: {stepCount} ступеней, {totalTime} сек ({fmtTime(totalTime)})
+                        {stepStartV}В → {endV}В | {stepCount} ступеней | {totalTime} сек ({fmtTime(totalTime)})
                       </Typography>
                       {warnings.map((w, i) => (
                         <Alert key={i} severity="warning" sx={{ py: 0, fontSize: '0.75rem' }}>{w}</Alert>

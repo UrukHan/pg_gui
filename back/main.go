@@ -152,15 +152,16 @@ func syncInstruments() {
 			inst = models.Instrument{Name: e.Name, Host: e.Host, Port: e.Port, Active: true}
 			database.DB.Create(&inst)
 			log.Printf("Instrument added: %s (%s:%d)", e.Name, e.Host, e.Port)
+		} else if inst.Name != e.Name {
+			inst.Name = e.Name
+			database.DB.Save(&inst)
+			log.Printf("Instrument renamed: %s (%s:%d)", e.Name, e.Host, e.Port)
 		}
 		// Query *IDN?
 		if info, err := scpi.QueryIDN(inst.Host, inst.Port); err == nil {
 			inst.Model = info.Model
 			inst.Firmware = info.Firmware
 			inst.Serial = info.Serial
-			if inst.Name == fmt.Sprintf("%s:%d", inst.Host, inst.Port) {
-				inst.Name = info.Model
-			}
 			database.DB.Save(&inst)
 			log.Printf("Instrument OK: %s (model=%s fw=%s)", inst.Name, info.Model, info.Firmware)
 		} else {
