@@ -274,7 +274,7 @@ export default function ExperimentsTab() {
                     <Typography variant="body2">
                       {exp.instrument_ids ? exp.instrument_ids.split(',').map((id) => {
                         const inst = instrumentsMap[Number(id.trim())];
-                        return inst?.model || inst?.name || `#${id.trim()}`;
+                        return inst?.name || inst?.model || `#${id.trim()}`;
                       }).join(', ') : '—'}
                     </Typography>
                   </Box>
@@ -300,7 +300,7 @@ export default function ExperimentsTab() {
                       const settings = JSON.parse(exp.settings_json) as Record<string, InstrumentSettings>;
                       return Object.entries(settings).map(([instId, s]) => {
                         const inst = instrumentsMap[Number(instId)];
-                        const name = inst?.model || inst?.name || `#${instId}`;
+                        const name = inst?.name || inst?.model || `#${instId}`;
                         const funcLabel = s.function === 'CURR' ? 'Ток' : s.function === 'RES' ? 'Сопр.' : 'Заряд';
                         return (
                           <Box key={instId}>
@@ -320,7 +320,7 @@ export default function ExperimentsTab() {
                       const sched = JSON.parse(exp.hv_schedule_json) as Record<string, HvPoint[]>;
                       return Object.entries(sched).filter(([, pts]) => pts.length > 0).map(([instId, pts]) => {
                         const inst = instrumentsMap[Number(instId)];
-                        const name = inst?.model || inst?.name || `#${instId}`;
+                        const name = inst?.name || inst?.model || `#${instId}`;
                         const voltRange = pts.length > 0
                           ? `${Math.min(...pts.map((p) => p.voltage))}–${Math.max(...pts.map((p) => p.voltage))}В`
                           : '';

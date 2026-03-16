@@ -59,11 +59,16 @@ func ApplySettings(host string, port int, s InstrumentSettings) error {
 		host, port, s.Function, s.Frequency, s.AutoRange, s.SourceOn, s.SourceVolt)
 
 	cmds := buildSettingsCommands(s)
+
+	// Send all commands on a single TCP connection — TH2690 requires this
+	results, err := SendBatch(host, port, cmds, 2*time.Second)
+	if err != nil {
+		log.Printf("[SCPI] ApplySettings %s:%d batch ERROR: %v", host, port, err)
+		return err
+	}
 	for _, cmd := range cmds {
-		resp, err := Send(host, port, cmd, 2*time.Second)
-		if err != nil {
-			log.Printf("[SCPI] ApplySettings %s:%d cmd=%q ERROR: %v", host, port, cmd, err)
-		} else if resp != "" {
+		resp := results[cmd]
+		if resp != "" {
 			log.Printf("[SCPI] ApplySettings %s:%d cmd=%q resp=%q", host, port, cmd, resp)
 		} else {
 			log.Printf("[SCPI] ApplySettings %s:%d cmd=%q OK", host, port, cmd)

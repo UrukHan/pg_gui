@@ -144,7 +144,7 @@ export default function GraphsTab({ experimentId }: Props) {
     return [...new Set(measurements.map((m) => m.instrument_id))].sort();
   }, [measurements]);
 
-  const instName = (id: number) => instrumentsMap[id]?.model || instrumentsMap[id]?.name || `#${id}`;
+  const instName = (id: number) => instrumentsMap[id]?.name || instrumentsMap[id]?.model || `#${id}`;
 
   // Measurement frequency (Hz)
   const measHz = useMemo(() => {
@@ -352,7 +352,7 @@ export default function GraphsTab({ experimentId }: Props) {
             const settings = JSON.parse(experiment.settings_json) as Record<string, InstrumentSettings>;
             const parts = Object.entries(settings).map(([instId, s]) => {
               const inst = instrumentsMap[Number(instId)];
-              const name = inst?.model || inst?.name || `#${instId}`;
+              const name = inst?.name || inst?.model || `#${instId}`;
               const funcLabel = s.function === 'CURR' ? 'Ток' : s.function === 'RES' ? 'Сопр.' : 'Заряд';
               return `${name}: ${funcLabel} ${s.frequency}Гц${s.source_on ? ` HV:${s.source_volt}В` : ''}`;
             });

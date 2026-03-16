@@ -96,6 +96,13 @@ export default function InstrumentsTab() {
   // Schedule editor dialog
   const [scheduleInstId, setScheduleInstId] = useState<number | null>(null);
   const [editPoints, setEditPoints] = useState<HvPoint[]>([]);
+  const [scheduleMode, setScheduleMode] = useState<'linear' | 'stepped'>('linear');
+  // Stepped mode params
+  const [stepStartV, setStepStartV] = useState(0);
+  const [stepEndV, setStepEndV] = useState(100);
+  const [stepDeltaV, setStepDeltaV] = useState(10);
+  const [stepDeltaSec, setStepDeltaSec] = useState(5);
+  const [stepCount, setStepCount] = useState(10);
 
   const [activeCamIdx, setActiveCamIdx] = useState(0);
   const [activeChartInstIdx, setActiveChartInstIdx] = useState(0);
@@ -261,6 +268,36 @@ export default function InstrumentsTab() {
     const pts = getSchedule(instId);
     setScheduleInstId(instId);
     setEditPoints(pts.length > 0 ? [...pts] : [{ time_sec: 0, voltage: 0 }]);
+    setScheduleMode('linear');
+  };
+
+  // Generate stepped points from params
+  const generateSteppedPoints = () => {
+    const pts: HvPoint[] = [];
+    const direction = stepEndV >= stepStartV ? 1 : -1;
+    const absDeltaV = Math.abs(stepDeltaV) || 1;
+    const actualDeltaV = absDeltaV * direction;
+    let v = stepStartV;
+    let t = 0;
+    for (let i = 0; i < stepCount; i++) {
+      // Clamp voltage to HV limits
+      const clamped = Math.max(-1000, Math.min(1000, v));
+      pts.push({ time_sec: t, voltage: clamped });
+      // Hold at this voltage for stepDeltaSec (add end-of-hold point)
+      pts.push({ time_sec: t + stepDeltaSec - 0.01, voltage: clamped });
+      t += stepDeltaSec;
+      v += actualDeltaV;
+      // Check if we've passed the end voltage
+      if (direction > 0 && v > stepEndV) v = stepEndV;
+      if (direction < 0 && v < stepEndV) v = stepEndV;
+    }
+    // Check warnings
+    const totalTime = stepCount * stepDeltaSec;
+    const maxV = Math.max(Math.abs(stepStartV), Math.abs(stepEndV));
+    const warnings: string[] = [];
+    if (durationSec > 0 && totalTime > durationSec) warnings.push(`\u0412\u0440\u0435\u043c\u044f ${totalTime}\u0441 > \u0434\u043b\u0438\u0442\u0435\u043b\u044c\u043d\u043e\u0441\u0442\u044c ${durationSec}\u0441`);
+    if (maxV > 1000) warnings.push('\u041d\u0430\u043f\u0440\u044f\u0436\u0435\u043d\u0438\u0435 \u043f\u0440\u0435\u0432\u044b\u0448\u0430\u0435\u0442 \u043f\u0440\u0435\u0434\u0435\u043b \u00b11000\u0412');
+    return { pts, warnings, totalTime };
   };
   const removeSchedulePoint = (idx: number) => {
     setEditPoints(editPoints.filter((_, i) => i !== idx));
@@ -435,7 +472,6 @@ export default function InstrumentsTab() {
                     value={durationSec} sx={{ width: 110 }}
                     onChange={(e) => { let v = Number(e.target.value); if (v < 0) v = 0; setDurationSec(v); }}
                     inputProps={{ min: 0, step: 10 }}
-                    helperText={durationSec > 0 ? fmtTime(durationSec) : '∞'}
                   />
                   <Typography variant="caption" color="text.secondary">сек</Typography>
                 </Stack>
@@ -600,7 +636,7 @@ export default function InstrumentsTab() {
                 <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
                   <Typography variant="subtitle2" fontWeight={700} noWrap
                     sx={{ opacity: inst.active ? 1 : 0.4 }}>
-                    {inst.model || inst.name}
+                    {inst.name}
                   </Typography>
                   <Stack direction="row" spacing={0.5} alignItems="center">
                     <IconButton size="small" disabled={disabled || !!runningExp}
@@ -686,59 +722,118 @@ export default function InstrumentsTab() {
       <Dialog open={scheduleInstId !== null} onClose={() => setScheduleInstId(null)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <TimelineIcon color="warning" />
-          Расписание HV — {scheduleInstId !== null && (instruments.find((i) => i.id === scheduleInstId)?.model || `#${scheduleInstId}`)}
+          Расписание HV — {scheduleInstId !== null && (instruments.find((i) => i.id === scheduleInstId)?.name || `#${scheduleInstId}`)}
         </DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Задайте ключевые точки изменения напряжения. Между точками значение интерполируется линейно.
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             Длительность эксперимента: <b>{fmtTime(durationSec)}</b>
           </Typography>
-          <Box sx={{ maxHeight: 180, overflowY: 'auto', mb: 2,
-            '&::-webkit-scrollbar': { display: 'none' },
-            scrollbarWidth: 'none',
-          }}>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 700, width: 120 }}>Время (сек)</TableCell>
-                  <TableCell sx={{ fontWeight: 700, width: 120 }}>Напряжение (В)</TableCell>
-                  <TableCell sx={{ width: 50 }} />
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {editPoints.map((pt, idx) => (
-                  <TableRow key={idx}>
-                    <TableCell>
-                      <TextField type="number" size="small" value={pt.time_sec}
-                        onChange={(e) => updateSchedulePoint(idx, 'time_sec', Number(e.target.value))}
-                        inputProps={{ min: 0, max: durationSec || 9999, step: 1 }}
-                        sx={{ width: 100 }} />
-                    </TableCell>
-                    <TableCell>
-                      <TextField type="number" size="small" value={pt.voltage}
-                        onChange={(e) => updateSchedulePoint(idx, 'voltage', Number(e.target.value))}
-                        inputProps={{ min: -1000, max: 1000, step: 1 }}
-                        sx={{ width: 100 }} />
-                    </TableCell>
-                    <TableCell>
-                      {idx === 0
-                        ? <Box sx={{ width: 32 }} />
-                        : <IconButton size="small" onClick={() => removeSchedulePoint(idx)} color="error">
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Box>
-          <Button startIcon={<AddIcon />} onClick={addSchedulePoint} size="small" variant="outlined">
-            Добавить точку
-          </Button>
+
+          <Tabs value={scheduleMode} onChange={(_, v) => setScheduleMode(v)} sx={{ mb: 1, minHeight: 36, '& .MuiTab-root': { minHeight: 36, py: 0.5, fontSize: '0.8rem' } }}>
+            <Tab label="Линейный" value="linear" />
+            <Tab label="Ступенчатый" value="stepped" />
+          </Tabs>
+
+          {scheduleMode === 'linear' ? (
+            <>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+                Задайте ключевые точки. Между точками значение интерполируется линейно.
+              </Typography>
+              <Box sx={{ maxHeight: 180, overflowY: 'auto', mb: 1,
+                '&::-webkit-scrollbar': { display: 'none' }, scrollbarWidth: 'none',
+              }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, width: 120 }}>Время (сек)</TableCell>
+                      <TableCell sx={{ fontWeight: 700, width: 120 }}>Напряжение (В)</TableCell>
+                      <TableCell sx={{ width: 50 }} />
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {editPoints.map((pt, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell>
+                          <TextField type="number" size="small" value={pt.time_sec}
+                            onChange={(e) => updateSchedulePoint(idx, 'time_sec', Number(e.target.value))}
+                            inputProps={{ min: 0, max: durationSec || 9999, step: 1 }}
+                            sx={{ width: 100 }} />
+                        </TableCell>
+                        <TableCell>
+                          <TextField type="number" size="small" value={pt.voltage}
+                            onChange={(e) => updateSchedulePoint(idx, 'voltage', Number(e.target.value))}
+                            inputProps={{ min: -1000, max: 1000, step: 1 }}
+                            sx={{ width: 100 }} />
+                        </TableCell>
+                        <TableCell>
+                          {idx === 0
+                            ? <Box sx={{ width: 32 }} />
+                            : <IconButton size="small" onClick={() => removeSchedulePoint(idx)} color="error">
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
+              <Button startIcon={<AddIcon />} onClick={addSchedulePoint} size="small" variant="outlined">
+                Добавить точку
+              </Button>
+            </>
+          ) : (
+            <>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+                Задайте параметры ступенчатого изменения напряжения.
+              </Typography>
+              <Stack spacing={1.5}>
+                <Stack direction="row" spacing={1}>
+                  <TextField label="Start V" type="number" size="small" value={stepStartV}
+                    onChange={(e) => setStepStartV(Number(e.target.value))}
+                    inputProps={{ min: -1000, max: 1000, step: 1 }} sx={{ flex: 1 }} />
+                  <TextField label="End V" type="number" size="small" value={stepEndV}
+                    onChange={(e) => setStepEndV(Number(e.target.value))}
+                    inputProps={{ min: -1000, max: 1000, step: 1 }} sx={{ flex: 1 }} />
+                </Stack>
+                <Stack direction="row" spacing={1}>
+                  <TextField label="Шаг (В)" type="number" size="small" value={stepDeltaV}
+                    onChange={(e) => { let v = Number(e.target.value); if (v < 1) v = 1; setStepDeltaV(v); }}
+                    inputProps={{ min: 1, max: 2000, step: 1 }} sx={{ flex: 1 }} />
+                  <TextField label="Шаг (сек)" type="number" size="small" value={stepDeltaSec}
+                    onChange={(e) => { let v = Number(e.target.value); if (v < 1) v = 1; setStepDeltaSec(v); }}
+                    inputProps={{ min: 1, max: 9999, step: 1 }} sx={{ flex: 1 }} />
+                  <TextField label="Кол-во шагов" type="number" size="small" value={stepCount}
+                    onChange={(e) => { let v = Number(e.target.value); if (v < 1) v = 1; if (v > 200) v = 200; setStepCount(v); }}
+                    inputProps={{ min: 1, max: 200, step: 1 }} sx={{ flex: 1 }} />
+                </Stack>
+                {(() => {
+                  const { warnings, totalTime } = generateSteppedPoints();
+                  return (
+                    <>
+                      <Typography variant="caption" color="text.secondary">
+                        Итого: {stepCount} ступеней, {totalTime} сек ({fmtTime(totalTime)})
+                      </Typography>
+                      {warnings.map((w, i) => (
+                        <Alert key={i} severity="warning" sx={{ py: 0, fontSize: '0.75rem' }}>{w}</Alert>
+                      ))}
+                    </>
+                  );
+                })()}
+                <Button variant="outlined" size="small" onClick={() => {
+                  const { pts } = generateSteppedPoints();
+                  setEditPoints(pts);
+                }}>
+                  Сгенерировать точки
+                </Button>
+              </Stack>
+            </>
+          )}
 
           {schedulePreviewData && (
             <Box sx={{ mt: 2, height: 160 }}>
-              <Typography variant="caption" fontWeight={600} color="text.secondary">Превью</Typography>
+              <Typography variant="caption" fontWeight={600} color="text.secondary">
+                Превью ({editPoints.length} точек)
+              </Typography>
               <Line data={schedulePreviewData} options={{
                 responsive: true, maintainAspectRatio: false,
                 animation: false as const,
