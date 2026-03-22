@@ -291,39 +291,98 @@ export default function GraphsTab({ experimentId }: Props) {
   // Build aggregate datasets for given params
   const makeAggDatasets = (params: ParamKey[]) => {
     const filteredInstIds = instrumentIds.filter((id) => activeInstruments.includes(id));
+    const multiInst = filteredInstIds.length > 1;
     const datasets: any[] = [];
 
-    filteredInstIds.forEach((instId, instIdx) => {
+    // For bar charts with multiple instruments: compute avg |max| per instrument
+    // so instruments with smaller average render behind (higher order = behind)
+    const instAvgAbs: Record<number, number> = {};
+    if (multiInst) {
+      filteredInstIds.forEach((instId) => {
+        const bks = aggByInstrument[instId] || [];
+        if (bks.length === 0) { instAvgAbs[instId] = 0; return; }
+        let sum = 0;
+        bks.forEach((b) => { sum += Math.abs(b.current_max); });
+        instAvgAbs[instId] = sum / bks.length;
+      });
+    }
+    // Sort: largest avg first (renders behind), smallest avg last (renders in front)
+    const sortedInstIds = multiInst
+      ? [...filteredInstIds].sort((a, b) => (instAvgAbs[b] || 0) - (instAvgAbs[a] || 0))
+      : filteredInstIds;
+
+    sortedInstIds.forEach((instId, instIdx) => {
       const bks = aggByInstrument[instId] || [];
-      const name = filteredInstIds.length > 1 ? instName(instId) : '';
+      // For coloring, use original index to keep consistent colors per instrument
+      const origIdx = filteredInstIds.indexOf(instId);
+      const name = multiInst ? instName(instId) : '';
 
       params.forEach((key) => {
         const param = PARAMS.find((p) => p.key === key)!;
         const minKey = `${key}_min` as keyof AggBucket;
         const maxKey = `${key}_max` as keyof AggBucket;
         const cType = paramChartType(key);
-        const baseColor = filteredInstIds.length > 1 && params.length === 1
-          ? INST_COLORS[instIdx % INST_COLORS.length]
+        const baseColor = multiInst && params.length === 1
+          ? INST_COLORS[origIdx % INST_COLORS.length]
           : param.color;
         const label = name ? `${name}: ${param.short}` : param.label;
 
         if (cType === 'bar') {
-          // Single floating bar [min, max] — only 2 values per column
-          datasets.push({
-            type: 'bar' as const,
-            label,
-            data: bks.map((b) => {
-              const mn = b[minKey] as number;
-              const mx = b[maxKey] as number;
-              if (Math.abs(mx) >= 999) return null;
-              return [mn, mx];
-            }),
-            backgroundColor: baseColor + '70',
-            borderColor: baseColor,
-            borderWidth: 0,
-            barPercentage: 1.0,
-            categoryPercentage: 1.0,
-          });
+          if (multiInst) {
+            // Multi-instrument: single floating bar [min, max] per instrument
+            // order: largest avg → higher order (behind), smallest avg → lower order (front)
+            datasets.push({
+              type: 'bar' as const,
+              label,
+              data: bks.map((b) => {
+                const mn = b[minKey] as number;
+                const mx = b[maxKey] as number;
+                if (Math.abs(mx) >= 999) return null;
+                return [mn, mx];
+              }),
+              backgroundColor: baseColor + '70',
+              borderColor: baseColor,
+              borderWidth: 0,
+              barPercentage: 1.0,
+              categoryPercentage: 1.0,
+              order: instIdx, // 0 = first sorted (largest) = behind, last = front
+            });
+          } else {
+            // Single instrument: two-color bar
+            // Color A: baseline [0 → min] (solid)
+            // Color B: spread  [min → max] (lighter)
+            datasets.push({
+              type: 'bar' as const,
+              label: `${param.label} (баз.)`,
+              data: bks.map((b) => {
+                const mn = b[minKey] as number;
+                if (Math.abs(mn) >= 999) return null;
+                return mn;
+              }),
+              backgroundColor: baseColor + 'bb',
+              borderColor: baseColor,
+              borderWidth: 0,
+              barPercentage: 1.0,
+              categoryPercentage: 1.0,
+              order: 2,
+            });
+            datasets.push({
+              type: 'bar' as const,
+              label: `${param.label} (макс.)`,
+              data: bks.map((b) => {
+                const mn = b[minKey] as number;
+                const mx = b[maxKey] as number;
+                if (Math.abs(mx) >= 999) return null;
+                return [mn, mx];
+              }),
+              backgroundColor: baseColor + '40',
+              borderColor: baseColor + '80',
+              borderWidth: 0,
+              barPercentage: 1.0,
+              categoryPercentage: 1.0,
+              order: 1,
+            });
+          }
         } else {
           // Line chart showing MAX value (for source, voltage, etc.)
           datasets.push({
@@ -340,7 +399,7 @@ export default function GraphsTab({ experimentId }: Props) {
             tension: 0.1,
             fill: false,
             spanGaps: true,
-            borderDash: filteredInstIds.length > 1 ? INST_DASH[instIdx % INST_DASH.length] : [],
+            borderDash: multiInst ? INST_DASH[origIdx % INST_DASH.length] : [],
           });
         }
       });
