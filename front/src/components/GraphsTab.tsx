@@ -58,6 +58,7 @@ const INTERVAL_OPTIONS = [
 ];
 
 const PER_PAGE_OPTIONS = [100, 250, 500, 1000, 2000];
+const CHART_MAX_POINTS = 1500;
 
 function fmtMs(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -114,7 +115,7 @@ export default function GraphsTab({ experimentId }: Props) {
     if (experimentId !== null) setSelectedExpId(experimentId);
   }, [experimentId]);
 
-  // Reset state on experiment change — first fetch to get time bounds
+  // Reset state on experiment change — first fetch to get time bounds + downsampled overview
   useEffect(() => {
     if (selectedExpId === null) return;
     setLoading(true);
@@ -122,7 +123,7 @@ export default function GraphsTab({ experimentId }: Props) {
     setPage(1);
     setIntervalSec(0);
     setTimeRange([0, 100]);
-    getExperimentData(selectedExpId, { per_page: 2000 })
+    getExperimentData(selectedExpId, { max_points: CHART_MAX_POINTS, per_page: CHART_MAX_POINTS })
       .then((res) => {
         setExperiment(res.data.experiment);
         const meas = res.data.measurements || [];
@@ -172,13 +173,22 @@ export default function GraphsTab({ experimentId }: Props) {
 
     const minT = new Date(timeMin).getTime();
     const dur = durationMs || 1;
-    const from = new Date(minT + (timeRange[0] / 100) * dur).toISOString();
-    const to = new Date(minT + (timeRange[1] / 100) * dur).toISOString();
+    const fromTime = timeRange[0] > 0 ? new Date(minT + (timeRange[0] / 100) * dur).toISOString() : undefined;
+    const toTime = timeRange[1] < 100 ? new Date(minT + (timeRange[1] / 100) * dur).toISOString() : undefined;
 
     try {
-      const res = await getExperimentData(selectedExpId, {
-        from, to, step, page, per_page: perPage,
-      });
+      let res;
+      if (viewMode === 'chart') {
+        // Chart mode: get downsampled points for full visible range
+        res = await getExperimentData(selectedExpId, {
+          from: fromTime, to: toTime, max_points: CHART_MAX_POINTS, per_page: CHART_MAX_POINTS,
+        });
+      } else {
+        // Table mode: paginated, optionally with step
+        res = await getExperimentData(selectedExpId, {
+          from: fromTime, to: toTime, step, page, per_page: perPage,
+        });
+      }
       if (id !== fetchRef.current) return; // stale
       setMeasurements(res.data.measurements || []);
       setFilteredTotal(res.data.filtered_total);
@@ -187,7 +197,7 @@ export default function GraphsTab({ experimentId }: Props) {
     } finally {
       if (id === fetchRef.current) setLoading(false);
     }
-  }, [selectedExpId, timeMin, timeMax, durationMs, timeRange, step, page, perPage]);
+  }, [selectedExpId, timeMin, timeMax, durationMs, timeRange, step, page, perPage, viewMode]);
 
   // Debounced fetch on filter change (not on initial load)
   const isInitial = useRef(true);
@@ -198,7 +208,7 @@ export default function GraphsTab({ experimentId }: Props) {
   }, [fetchData]);
 
   // Reset page on filter change
-  useEffect(() => { setPage(1); }, [timeRange, intervalSec, perPage]);
+  useEffect(() => { setPage(1); }, [timeRange, intervalSec, perPage, viewMode]);
 
   const toggleParam = (key: ParamKey) => {
     setActiveParams((prev) =>

@@ -105,7 +105,7 @@ export const getExperiment = (id: number) =>
 
 export const getExperimentData = (
   id: number,
-  params?: { from?: string; to?: string; step?: number; page?: number; per_page?: number }
+  params?: { from?: string; to?: string; step?: number; page?: number; per_page?: number; max_points?: number }
 ) =>
   API.get<{
     experiment: Experiment;

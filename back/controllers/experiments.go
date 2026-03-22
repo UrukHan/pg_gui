@@ -73,106 +73,116 @@ func GetExperimentData(c *gin.Context) {
 		return
 	}
 
-	// Time bounds for the full experiment
-	var timeMin, timeMax *time.Time
+	// Single query for time bounds + total count
+	var stats struct {
+		TimeMin *time.Time
+		TimeMax *time.Time
+		Total   int64
+	}
 	database.DB.Model(&models.Measurement{}).
 		Where("experiment_id = ?", id).
-		Select("MIN(recorded_at)").Row().Scan(&timeMin)
-	database.DB.Model(&models.Measurement{}).
-		Where("experiment_id = ?", id).
-		Select("MAX(recorded_at)").Row().Scan(&timeMax)
+		Select("MIN(recorded_at) as time_min, MAX(recorded_at) as time_max, COUNT(*) as total").
+		Scan(&stats)
 
-	// Total count (unfiltered)
-	var totalCount int64
-	database.DB.Model(&models.Measurement{}).Where("experiment_id = ?", id).Count(&totalCount)
-
-	// Build filtered query
-	q := database.DB.Where("experiment_id = ?", id)
-
-	// Time range filter: ?from=<RFC3339>&to=<RFC3339>
+	// Build WHERE conditions for time range filter
+	type whereClause struct {
+		cond string
+		val  interface{}
+	}
+	var extraWhere []whereClause
 	if fromStr := c.Query("from"); fromStr != "" {
 		if t, err := time.Parse(time.RFC3339Nano, fromStr); err == nil {
-			q = q.Where("recorded_at >= ?", t)
+			extraWhere = append(extraWhere, whereClause{"recorded_at >= ?", t})
 		}
 	}
 	if toStr := c.Query("to"); toStr != "" {
 		if t, err := time.Parse(time.RFC3339Nano, toStr); err == nil {
-			q = q.Where("recorded_at <= ?", t)
+			extraWhere = append(extraWhere, whereClause{"recorded_at <= ?", t})
 		}
 	}
 
-	// Count after time filter
-	var filteredCount int64
-	q.Model(&models.Measurement{}).Count(&filteredCount)
+	// Count in filtered range
+	filteredCount := stats.Total
+	if len(extraWhere) > 0 {
+		q := database.DB.Model(&models.Measurement{}).Where("experiment_id = ?", id)
+		for _, w := range extraWhere {
+			q = q.Where(w.cond, w.val)
+		}
+		q.Count(&filteredCount)
+	}
 
-	// Step (decimation): ?step=N  — return every Nth row
+	// Step (decimation): ?step=N or auto from ?max_points=N
 	step := 1
 	if s, err := strconv.Atoi(c.Query("step")); err == nil && s > 1 {
 		step = s
 	}
+	if mp, err := strconv.Atoi(c.Query("max_points")); err == nil && mp > 0 && filteredCount > int64(mp) {
+		step = int(filteredCount) / mp
+		if step < 1 {
+			step = 1
+		}
+	}
 
 	// Pagination: ?page=1&per_page=500
 	page := 1
-	perPage := 2000 // default generous limit
+	perPage := 2000
 	if p, err := strconv.Atoi(c.Query("page")); err == nil && p > 0 {
 		page = p
 	}
-	if pp, err := strconv.Atoi(c.Query("per_page")); err == nil && pp > 0 && pp <= 10000 {
+	if pp, err := strconv.Atoi(c.Query("per_page")); err == nil && pp > 0 && pp <= 50000 {
 		perPage = pp
 	}
 
 	var measurements []models.Measurement
+
 	if step > 1 {
-		// Use ROW_NUMBER for decimation (Postgres)
-		subQ := database.DB.Model(&models.Measurement{}).
-			Where("experiment_id = ?", id)
-		if fromStr := c.Query("from"); fromStr != "" {
-			if t, err := time.Parse(time.RFC3339Nano, fromStr); err == nil {
-				subQ = subQ.Where("recorded_at >= ?", t)
-			}
-		}
-		if toStr := c.Query("to"); toStr != "" {
-			if t, err := time.Parse(time.RFC3339Nano, toStr); err == nil {
-				subQ = subQ.Where("recorded_at <= ?", t)
-			}
-		}
-		// Simple approach: fetch IDs with step, then load full rows
-		var allIDs []uint
-		subQ.Order("recorded_at ASC").Pluck("id", &allIDs)
-
-		var decimatedIDs []uint
-		for i := 0; i < len(allIDs); i += step {
-			decimatedIDs = append(decimatedIDs, allIDs[i])
+		// Efficient SQL-based decimation using ROW_NUMBER()
+		// Build the inner WHERE clause
+		innerWhere := "experiment_id = ?"
+		args := []interface{}{id}
+		for _, w := range extraWhere {
+			innerWhere += " AND " + w.cond
+			args = append(args, w.val)
 		}
 
-		decimatedTotal := len(decimatedIDs)
+		decimatedTotal := filteredCount / int64(step)
 		offset := (page - 1) * perPage
-		if offset >= decimatedTotal {
+
+		query := `
+			SELECT * FROM (
+				SELECT *, ROW_NUMBER() OVER (ORDER BY recorded_at ASC) AS rn
+				FROM measurements
+				WHERE ` + innerWhere + `
+			) sub
+			WHERE (sub.rn - 1) % ? = 0
+			ORDER BY recorded_at ASC
+			LIMIT ? OFFSET ?`
+		args = append(args, step, perPage, offset)
+
+		database.DB.Raw(query, args...).Scan(&measurements)
+		if measurements == nil {
 			measurements = []models.Measurement{}
-		} else {
-			end := offset + perPage
-			if end > decimatedTotal {
-				end = decimatedTotal
-			}
-			pageIDs := decimatedIDs[offset:end]
-			database.DB.Where("id IN ?", pageIDs).Order("recorded_at ASC").Find(&measurements)
 		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"experiment":     exp,
 			"measurements":   measurements,
-			"total":          totalCount,
-			"filtered_total": int64(decimatedTotal),
+			"total":          stats.Total,
+			"filtered_total": decimatedTotal,
 			"page":           page,
 			"per_page":       perPage,
-			"time_min":       timeMin,
-			"time_max":       timeMax,
+			"time_min":       stats.TimeMin,
+			"time_max":       stats.TimeMax,
 		})
 		return
 	}
 
 	// No decimation — simple pagination
 	offset := (page - 1) * perPage
+	q := database.DB.Where("experiment_id = ?", id)
+	for _, w := range extraWhere {
+		q = q.Where(w.cond, w.val)
+	}
 	if err := q.Order("recorded_at ASC").Offset(offset).Limit(perPage).Find(&measurements).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -181,12 +191,12 @@ func GetExperimentData(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"experiment":     exp,
 		"measurements":   measurements,
-		"total":          totalCount,
+		"total":          stats.Total,
 		"filtered_total": filteredCount,
 		"page":           page,
 		"per_page":       perPage,
-		"time_min":       timeMin,
-		"time_max":       timeMax,
+		"time_min":       stats.TimeMin,
+		"time_max":       stats.TimeMax,
 	})
 }
 

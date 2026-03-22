@@ -34,6 +34,10 @@ func Init() {
 		log.Fatal("Auto-migration failed:", err)
 	}
 
+	// Composite index for fast experiment data queries
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_measurements_exp_recorded
+	         ON measurements (experiment_id, recorded_at)`)
+
 	seedAdmin()
 }
 
