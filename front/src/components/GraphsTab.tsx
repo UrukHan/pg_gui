@@ -688,7 +688,7 @@ export default function GraphsTab({ experimentId }: Props) {
                     return (
                       <Paper key={key} sx={{ p: 1, height: { xs: 220, md: 300 } }}>
                         <Chart
-                          ref={(ref) => { separateChartRefs.current[key] = ref; }}
+                          ref={(ref: any) => { separateChartRefs.current[key] = ref ?? null; }}
                           type={hasBar ? 'bar' : 'line'}
                           data={{ labels: aggLabels, datasets: makeAggDatasets([key]) }}
                           options={aggChartOptions(param.label, hasBar)}
