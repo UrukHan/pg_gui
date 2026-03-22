@@ -59,8 +59,8 @@ const INTERVAL_OPTIONS = [
 ];
 
 const PER_PAGE_OPTIONS = [100, 250, 500, 1000, 2000];
-const MIN_CHART_PTS = 800;
-const MAX_CHART_PTS = 6000;
+const DEFAULT_CHART_PTS = 1500;
+const MAX_CHART_PTS = 2000;
 
 function fmtMs(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -120,25 +120,25 @@ export default function GraphsTab({ experimentId }: Props) {
   const [filteredTotal, setFilteredTotal] = useState(0);
   const fetchRef = useRef(0);
 
-  // Chart container width detection
+  // Chart container width — use ref to avoid re-render/re-fetch loops
   const chartContainerRef = useRef<HTMLDivElement>(null);
-  const [chartWidth, setChartWidth] = useState(1500);
+  const chartPtsRef = useRef(DEFAULT_CHART_PTS);
   useEffect(() => {
     const el = chartContainerRef.current;
     if (!el) return;
+    let timer: ReturnType<typeof setTimeout>;
     const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const w = Math.round(entry.contentRect.width);
-        if (w > 100) setChartWidth(w);
-      }
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        for (const entry of entries) {
+          const w = Math.round(entry.contentRect.width);
+          if (w > 100) chartPtsRef.current = Math.min(MAX_CHART_PTS, w);
+        }
+      }, 500);
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { ro.disconnect(); clearTimeout(timer); };
   }, []);
-
-  const chartMaxPoints = useMemo(() => {
-    return Math.max(MIN_CHART_PTS, Math.min(MAX_CHART_PTS, chartWidth));
-  }, [chartWidth]);
 
   // Chart refs for screenshot
   const combinedChartRef = useRef<ChartJS | null>(null);
@@ -166,7 +166,7 @@ export default function GraphsTab({ experimentId }: Props) {
     setPage(1);
     setIntervalSec(0);
     setTimeRange([0, 100]);
-    getExperimentAggData(selectedExpId, { max_points: chartMaxPoints })
+    getExperimentAggData(selectedExpId, { max_points: chartPtsRef.current })
       .then((res) => {
         setExperiment(res.data.experiment);
         const bk = res.data.buckets || [];
@@ -181,7 +181,7 @@ export default function GraphsTab({ experimentId }: Props) {
       })
       .catch((e) => setError(e.response?.data?.error || 'Ошибка загрузки данных'))
       .finally(() => setLoading(false));
-  }, [selectedExpId, chartMaxPoints]);
+  }, [selectedExpId]);
 
   // Unique instrument IDs in aggregated data
   const instrumentIds = useMemo(() => {
@@ -220,7 +220,7 @@ export default function GraphsTab({ experimentId }: Props) {
     try {
       if (viewMode === 'chart') {
         const res = await getExperimentAggData(selectedExpId, {
-          from: fromTime, to: toTime, max_points: chartMaxPoints,
+          from: fromTime, to: toTime, max_points: chartPtsRef.current,
         });
         if (id !== fetchRef.current) return;
         setAggBuckets(res.data.buckets || []);
@@ -238,7 +238,7 @@ export default function GraphsTab({ experimentId }: Props) {
     } finally {
       if (id === fetchRef.current) setLoading(false);
     }
-  }, [selectedExpId, timeMin, timeMax, durationMs, timeRange, step, page, perPage, viewMode, chartMaxPoints]);
+  }, [selectedExpId, timeMin, timeMax, durationMs, timeRange, step, page, perPage, viewMode]);
 
   const isInitial = useRef(true);
   useEffect(() => {
@@ -308,34 +308,21 @@ export default function GraphsTab({ experimentId }: Props) {
         const label = name ? `${name}: ${param.short}` : param.label;
 
         if (cType === 'bar') {
-          // Min-max floating bars: base color from 0→min, spread color from min→max
+          // Single floating bar [min, max] — only 2 values per column
           datasets.push({
             type: 'bar' as const,
-            label: `${label} (мин)`,
+            label,
             data: bks.map((b) => {
               const mn = b[minKey] as number;
-              return Math.abs(mn) >= 999 ? null : mn;
+              const mx = b[maxKey] as number;
+              if (Math.abs(mx) >= 999) return null;
+              return [mn, mx];
             }),
-            backgroundColor: baseColor + '99',
+            backgroundColor: baseColor + '70',
             borderColor: baseColor,
             borderWidth: 0,
             barPercentage: 1.0,
             categoryPercentage: 1.0,
-            order: 2,
-          });
-          datasets.push({
-            type: 'bar' as const,
-            label: `${label} (макс)`,
-            data: bks.map((b) => {
-              const mx = b[maxKey] as number;
-              return Math.abs(mx) >= 999 ? null : mx;
-            }),
-            backgroundColor: baseColor + '35',
-            borderColor: baseColor + '60',
-            borderWidth: 0,
-            barPercentage: 1.0,
-            categoryPercentage: 1.0,
-            order: 1,
           });
         } else {
           // Line chart showing MAX value (for source, voltage, etc.)
@@ -519,7 +506,7 @@ export default function GraphsTab({ experimentId }: Props) {
           <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
             {total.toLocaleString()} изм.
             {durationMs > 0 && <> | {fmtMs(durationMs)}</>}
-            {viewMode === 'chart' && <> | {chartMaxPoints}px</>}
+            {viewMode === 'chart' && <> | {chartPtsRef.current}px</>}
           </Typography>
         )}
 
