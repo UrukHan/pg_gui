@@ -101,6 +101,13 @@ func GetExperimentData(c *gin.Context) {
 		}
 	}
 
+	innerWhere := "experiment_id = ?"
+	args := []interface{}{id}
+	for _, w := range extraWhere {
+		innerWhere += " AND " + w.cond
+		args = append(args, w.val)
+	}
+
 	// Count in filtered range
 	filteredCount := stats.Total
 	if len(extraWhere) > 0 {
@@ -110,6 +117,88 @@ func GetExperimentData(c *gin.Context) {
 		}
 		q.Count(&filteredCount)
 	}
+
+	// ── Aggregate mode: ?aggregate=minmax&max_points=N ──
+	// Returns NTILE-bucketed min/max per instrument for chart rendering
+	if c.Query("aggregate") == "minmax" {
+		maxPoints := 1500
+		if mp, err := strconv.Atoi(c.Query("max_points")); err == nil && mp > 0 {
+			maxPoints = mp
+		}
+		if maxPoints > 10000 {
+			maxPoints = 10000
+		}
+
+		type AggBucket struct {
+			Bucket         int       `json:"bucket"`
+			InstrumentID   uint      `json:"instrument_id"`
+			RecordedAt     time.Time `json:"recorded_at"`
+			RecordedEnd    time.Time `json:"recorded_end"`
+			PointCount     int       `json:"point_count"`
+			VoltageMin     float64   `json:"voltage_min"`
+			VoltageMax     float64   `json:"voltage_max"`
+			CurrentMin     float64   `json:"current_min"`
+			CurrentMax     float64   `json:"current_max"`
+			ChargeMin      float64   `json:"charge_min"`
+			ChargeMax      float64   `json:"charge_max"`
+			ResistanceMin  float64   `json:"resistance_min"`
+			ResistanceMax  float64   `json:"resistance_max"`
+			TemperatureMin float64   `json:"temperature_min"`
+			TemperatureMax float64   `json:"temperature_max"`
+			HumidityMin    float64   `json:"humidity_min"`
+			HumidityMax    float64   `json:"humidity_max"`
+			SourceMin      float64   `json:"source_min"`
+			SourceMax      float64   `json:"source_max"`
+			MathValueMin   float64   `json:"math_value_min"`
+			MathValueMax   float64   `json:"math_value_max"`
+		}
+
+		query := `
+			WITH bucketed AS (
+				SELECT *, NTILE(?) OVER (PARTITION BY instrument_id ORDER BY recorded_at ASC) AS bucket
+				FROM measurements
+				WHERE ` + innerWhere + `
+			)
+			SELECT
+				bucket,
+				instrument_id,
+				MIN(recorded_at) AS recorded_at,
+				MAX(recorded_at) AS recorded_end,
+				COUNT(*)::int     AS point_count,
+				MIN(voltage) AS voltage_min,       MAX(voltage) AS voltage_max,
+				MIN(current) AS current_min,       MAX(current) AS current_max,
+				MIN(charge) AS charge_min,          MAX(charge) AS charge_max,
+				MIN(resistance) AS resistance_min, MAX(resistance) AS resistance_max,
+				MIN(temperature) AS temperature_min, MAX(temperature) AS temperature_max,
+				MIN(humidity) AS humidity_min,      MAX(humidity) AS humidity_max,
+				MIN(source) AS source_min,          MAX(source) AS source_max,
+				MIN(math_value) AS math_value_min, MAX(math_value) AS math_value_max
+			FROM bucketed
+			GROUP BY instrument_id, bucket
+			ORDER BY instrument_id, bucket`
+
+		aggArgs := []interface{}{maxPoints}
+		aggArgs = append(aggArgs, args...)
+
+		var buckets []AggBucket
+		database.DB.Raw(query, aggArgs...).Scan(&buckets)
+		if buckets == nil {
+			buckets = []AggBucket{}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"experiment": exp,
+			"buckets":    buckets,
+			"aggregated": true,
+			"total":      stats.Total,
+			"max_points": maxPoints,
+			"time_min":   stats.TimeMin,
+			"time_max":   stats.TimeMax,
+		})
+		return
+	}
+
+	// ── Row-level mode (table view, live view) ──
 
 	// Step (decimation): ?step=N or auto from ?max_points=N
 	step := 1
@@ -123,7 +212,6 @@ func GetExperimentData(c *gin.Context) {
 		}
 	}
 
-	// Pagination: ?page=1&per_page=500
 	page := 1
 	perPage := 2000
 	if p, err := strconv.Atoi(c.Query("page")); err == nil && p > 0 {
@@ -136,15 +224,6 @@ func GetExperimentData(c *gin.Context) {
 	var measurements []models.Measurement
 
 	if step > 1 {
-		// Efficient SQL-based decimation using ROW_NUMBER()
-		// Build the inner WHERE clause
-		innerWhere := "experiment_id = ?"
-		args := []interface{}{id}
-		for _, w := range extraWhere {
-			innerWhere += " AND " + w.cond
-			args = append(args, w.val)
-		}
-
 		decimatedTotal := filteredCount / int64(step)
 		offset := (page - 1) * perPage
 
@@ -157,9 +236,11 @@ func GetExperimentData(c *gin.Context) {
 			WHERE (sub.rn - 1) % ? = 0
 			ORDER BY recorded_at ASC
 			LIMIT ? OFFSET ?`
-		args = append(args, step, perPage, offset)
+		stepArgs := make([]interface{}, len(args))
+		copy(stepArgs, args)
+		stepArgs = append(stepArgs, step, perPage, offset)
 
-		database.DB.Raw(query, args...).Scan(&measurements)
+		database.DB.Raw(query, stepArgs...).Scan(&measurements)
 		if measurements == nil {
 			measurements = []models.Measurement{}
 		}

@@ -5,6 +5,7 @@ import type {
   Camera,
   Experiment,
   Measurement,
+  AggBucket,
   InstrumentSettings,
 } from "./types";
 
@@ -117,6 +118,20 @@ export const getExperimentData = (
     time_min: string | null;
     time_max: string | null;
   }>(`/experiments/${id}/data`, { params });
+
+export const getExperimentAggData = (
+  id: number,
+  params?: { from?: string; to?: string; max_points?: number }
+) =>
+  API.get<{
+    experiment: Experiment;
+    buckets: AggBucket[];
+    aggregated: boolean;
+    total: number;
+    max_points: number;
+    time_min: string | null;
+    time_max: string | null;
+  }>(`/experiments/${id}/data`, { params: { ...params, aggregate: 'minmax' } });
 
 export const getExperimentStatus = (id: number) =>
   API.get<{

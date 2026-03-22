@@ -5,22 +5,24 @@ import {
   Box, Typography, Paper, CircularProgress, Alert, FormControl,
   InputLabel, Select, MenuItem, Stack, Chip, ToggleButton, ToggleButtonGroup,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Slider, IconButton, Pagination,
+  Slider, IconButton, Pagination, Button, Tooltip as MuiTooltip,
 } from '@mui/material';
 import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import DownloadIcon from '@mui/icons-material/Download';
 import {
   Chart as ChartJS,
-  CategoryScale, LinearScale, PointElement, LineElement,
+  CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController,
   Title, Tooltip, Legend, TimeScale,
 } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
-import { Line } from 'react-chartjs-2';
-import { getExperimentData, listExperiments, getExperimentVideoUrl, listInstruments } from '@/api';
-import type { Experiment, Measurement, Instrument, InstrumentSettings } from '@/types';
+import { Chart } from 'react-chartjs-2';
+import { getExperimentData, getExperimentAggData, listExperiments, getExperimentVideoUrl, listInstruments } from '@/api';
+import type { Experiment, Measurement, AggBucket, Instrument, InstrumentSettings } from '@/types';
 
 ChartJS.register(
-  CategoryScale, LinearScale, PointElement, LineElement,
+  CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController,
   Title, Tooltip, Legend, TimeScale, zoomPlugin,
 );
 
@@ -35,7 +37,7 @@ const PARAMS = [
   { key: 'resistance', label: 'Сопротивление (Ом)', short: 'R, Ом', color: '#ff9800' },
   { key: 'temperature', label: 'Температура (°C)', short: 'T, °C', color: '#9c27b0' },
   { key: 'humidity', label: 'Влажность (%)', short: 'H, %', color: '#00bcd4' },
-  { key: 'source', label: 'Источник', short: 'Src', color: '#795548' },
+  { key: 'source', label: 'Источник (В)', short: 'Src, В', color: '#795548' },
   { key: 'math_value', label: 'Math', short: 'Math', color: '#607d8b' },
 ] as const;
 
@@ -44,7 +46,6 @@ const INST_COLORS = ['#1976d2', '#d32f2f', '#388e3c', '#f57c00', '#7b1fa2'];
 
 type ParamKey = typeof PARAMS[number]['key'];
 
-// Time-based interval options (seconds)
 const INTERVAL_OPTIONS = [
   { sec: 0, label: 'Все' },
   { sec: 0.2, label: '0.2с' },
@@ -58,7 +59,8 @@ const INTERVAL_OPTIONS = [
 ];
 
 const PER_PAGE_OPTIONS = [100, 250, 500, 1000, 2000];
-const CHART_MAX_POINTS = 1500;
+const MIN_CHART_PTS = 800;
+const MAX_CHART_PTS = 6000;
 
 function fmtMs(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -72,10 +74,26 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadChartPng(chartRef: React.RefObject<ChartJS | null>, name: string) {
+  const chart = chartRef.current;
+  if (!chart) return;
+  const url = chart.toBase64Image('image/png', 1);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+}
+
 export default function GraphsTab({ experimentId }: Props) {
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [selectedExpId, setSelectedExpId] = useState<number | null>(experimentId);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  const [aggBuckets, setAggBuckets] = useState<AggBucket[]>([]);
   const [experiment, setExperiment] = useState<Experiment | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -94,13 +112,38 @@ export default function GraphsTab({ experimentId }: Props) {
     return new Date(timeMax).getTime() - new Date(timeMin).getTime();
   }, [timeMin, timeMax]);
 
-  // Step & pagination
-  const [intervalSec, setIntervalSec] = useState(0); // 0 = all points
+  // Step & pagination (table mode)
+  const [intervalSec, setIntervalSec] = useState(0);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(500);
   const [total, setTotal] = useState(0);
   const [filteredTotal, setFilteredTotal] = useState(0);
   const fetchRef = useRef(0);
+
+  // Chart container width detection
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const [chartWidth, setChartWidth] = useState(1500);
+  useEffect(() => {
+    const el = chartContainerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.round(entry.contentRect.width);
+        if (w > 100) setChartWidth(w);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const chartMaxPoints = useMemo(() => {
+    return Math.max(MIN_CHART_PTS, Math.min(MAX_CHART_PTS, chartWidth));
+  }, [chartWidth]);
+
+  // Chart refs for screenshot
+  const combinedChartRef = useRef<ChartJS | null>(null);
+  const separateChartRefs = useRef<Record<string, ChartJS | null>>({});
+  const tableContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     listExperiments().then((res) => setExperiments(res.data)).catch(() => {});
@@ -115,7 +158,7 @@ export default function GraphsTab({ experimentId }: Props) {
     if (experimentId !== null) setSelectedExpId(experimentId);
   }, [experimentId]);
 
-  // Reset state on experiment change — first fetch to get time bounds + downsampled overview
+  // Initial load: fetch aggregate overview
   useEffect(() => {
     if (selectedExpId === null) return;
     setLoading(true);
@@ -123,49 +166,47 @@ export default function GraphsTab({ experimentId }: Props) {
     setPage(1);
     setIntervalSec(0);
     setTimeRange([0, 100]);
-    getExperimentData(selectedExpId, { max_points: CHART_MAX_POINTS, per_page: CHART_MAX_POINTS })
+    getExperimentAggData(selectedExpId, { max_points: chartMaxPoints })
       .then((res) => {
         setExperiment(res.data.experiment);
-        const meas = res.data.measurements || [];
-        setMeasurements(meas);
+        const bk = res.data.buckets || [];
+        setAggBuckets(bk);
         setTotal(res.data.total);
-        setFilteredTotal(res.data.filtered_total);
+        setFilteredTotal(res.data.total);
         setTimeMin(res.data.time_min);
         setTimeMax(res.data.time_max);
-        // Auto-detect instruments in data
-        const ids = [...new Set(meas.map((m) => m.instrument_id))];
+        setMeasurements([]);
+        const ids = [...new Set(bk.map((b) => b.instrument_id))];
         setActiveInstruments(ids);
       })
       .catch((e) => setError(e.response?.data?.error || 'Ошибка загрузки данных'))
       .finally(() => setLoading(false));
-  }, [selectedExpId]);
+  }, [selectedExpId, chartMaxPoints]);
 
-  // Unique instrument IDs in current data
+  // Unique instrument IDs in aggregated data
   const instrumentIds = useMemo(() => {
+    if (aggBuckets.length > 0) return [...new Set(aggBuckets.map((b) => b.instrument_id))].sort();
     return [...new Set(measurements.map((m) => m.instrument_id))].sort();
-  }, [measurements]);
+  }, [aggBuckets, measurements]);
 
   const instName = (id: number) => instrumentsMap[id]?.name || instrumentsMap[id]?.model || `#${id}`;
 
-  // Measurement frequency (Hz)
   const measHz = useMemo(() => {
-    if (!durationMs || !total) return 5; // default assumption
+    if (!durationMs || !total) return 5;
     return total / (durationMs / 1000);
   }, [total, durationMs]);
 
-  // Convert interval (sec) → step (every Nth row)
   const step = useMemo(() => {
     if (intervalSec <= 0) return 1;
     return Math.max(1, Math.round(intervalSec * measHz));
   }, [intervalSec, measHz]);
 
-  // Filter interval options: hide intervals shorter than measurement period
   const availableIntervals = useMemo(() => {
     const period = measHz > 0 ? 1 / measHz : 0.2;
     return INTERVAL_OPTIONS.filter((o) => o.sec === 0 || o.sec >= period * 1.5);
   }, [measHz]);
 
-  // Fetch with filters (debounced via ref)
+  // Fetch data on filter changes (debounced)
   const fetchData = useCallback(async () => {
     if (!selectedExpId || !timeMin || !timeMax) return;
     const id = ++fetchRef.current;
@@ -177,29 +218,28 @@ export default function GraphsTab({ experimentId }: Props) {
     const toTime = timeRange[1] < 100 ? new Date(minT + (timeRange[1] / 100) * dur).toISOString() : undefined;
 
     try {
-      let res;
       if (viewMode === 'chart') {
-        // Chart mode: get downsampled points for full visible range
-        res = await getExperimentData(selectedExpId, {
-          from: fromTime, to: toTime, max_points: CHART_MAX_POINTS, per_page: CHART_MAX_POINTS,
+        const res = await getExperimentAggData(selectedExpId, {
+          from: fromTime, to: toTime, max_points: chartMaxPoints,
         });
+        if (id !== fetchRef.current) return;
+        setAggBuckets(res.data.buckets || []);
+        setFilteredTotal(res.data.total);
       } else {
-        // Table mode: paginated, optionally with step
-        res = await getExperimentData(selectedExpId, {
+        const res = await getExperimentData(selectedExpId, {
           from: fromTime, to: toTime, step, page, per_page: perPage,
         });
+        if (id !== fetchRef.current) return;
+        setMeasurements(res.data.measurements || []);
+        setFilteredTotal(res.data.filtered_total);
       }
-      if (id !== fetchRef.current) return; // stale
-      setMeasurements(res.data.measurements || []);
-      setFilteredTotal(res.data.filtered_total);
     } catch (e: any) {
       if (id === fetchRef.current) setError(e.response?.data?.error || 'Ошибка');
     } finally {
       if (id === fetchRef.current) setLoading(false);
     }
-  }, [selectedExpId, timeMin, timeMax, durationMs, timeRange, step, page, perPage, viewMode]);
+  }, [selectedExpId, timeMin, timeMax, durationMs, timeRange, step, page, perPage, viewMode, chartMaxPoints]);
 
-  // Debounced fetch on filter change (not on initial load)
   const isInitial = useRef(true);
   useEffect(() => {
     if (isInitial.current) { isInitial.current = false; return; }
@@ -207,7 +247,6 @@ export default function GraphsTab({ experimentId }: Props) {
     return () => clearTimeout(timer);
   }, [fetchData]);
 
-  // Reset page on filter change
   useEffect(() => { setPage(1); }, [timeRange, intervalSec, perPage, viewMode]);
 
   const toggleParam = (key: ParamKey) => {
@@ -223,64 +262,131 @@ export default function GraphsTab({ experimentId }: Props) {
     return v.toFixed(4).replace(/\.?0+$/, '');
   };
 
-  // Build datasets grouped by instrument
-  const makeDatasets = (params: ParamKey[]) => {
+  // ── Aggregate chart data helpers ──
+  const aggByInstrument = useMemo(() => {
+    const map: Record<number, AggBucket[]> = {};
+    aggBuckets.forEach((b) => {
+      if (!map[b.instrument_id]) map[b.instrument_id] = [];
+      map[b.instrument_id].push(b);
+    });
+    return map;
+  }, [aggBuckets]);
+
+  // Labels from first active instrument's buckets
+  const aggLabels = useMemo(() => {
+    const filteredIds = instrumentIds.filter((id) => activeInstruments.includes(id));
+    const refId = filteredIds[0];
+    const bks = refId != null ? (aggByInstrument[refId] || []) : [];
+    return bks.map((b) => {
+      const d = new Date(b.recorded_at);
+      return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    });
+  }, [aggByInstrument, instrumentIds, activeInstruments]);
+
+  // Decides how to render a param: 'bar' for current, 'line' (max) for source, 'line' for others
+  const paramChartType = (key: ParamKey): 'bar' | 'line' => {
+    return key === 'current' ? 'bar' : 'line';
+  };
+
+  // Build aggregate datasets for given params
+  const makeAggDatasets = (params: ParamKey[]) => {
     const filteredInstIds = instrumentIds.filter((id) => activeInstruments.includes(id));
-    const multiInst = filteredInstIds.length > 1;
-
-    // For single instrument: use param colors. For multi: use instrument colors + param label
-    if (!multiInst) {
-      const instMeas = filteredInstIds.length === 1
-        ? measurements.filter((m) => m.instrument_id === filteredInstIds[0])
-        : measurements;
-      return params.map((key) => {
-        const param = PARAMS.find((p) => p.key === key)!;
-        return {
-          label: param.label,
-          data: instMeas.map((m) => {
-            const v = m[key] as number;
-            return Math.abs(v) >= 999 ? null : v;
-          }),
-          borderColor: param.color,
-          backgroundColor: param.color + '33',
-          borderWidth: 1.5,
-          pointRadius: 0,
-          tension: 0.3,
-          spanGaps: true,
-        };
-      });
-    }
-
-    // Multi-instrument: one dataset per instrument × param
-    // Use first instrument's time as reference axis
     const datasets: any[] = [];
+
     filteredInstIds.forEach((instId, instIdx) => {
-      const instMeas = measurements.filter((m) => m.instrument_id === instId);
-      const name = instName(instId);
+      const bks = aggByInstrument[instId] || [];
+      const name = filteredInstIds.length > 1 ? instName(instId) : '';
+
       params.forEach((key) => {
         const param = PARAMS.find((p) => p.key === key)!;
-        const color = INST_COLORS[instIdx % INST_COLORS.length];
-        datasets.push({
-          label: `${name}: ${param.short}`,
-          data: instMeas.map((m) => {
-            const v = m[key] as number;
-            return Math.abs(v) >= 999 ? null : v;
-          }),
-          borderColor: params.length === 1 ? color : param.color,
-          backgroundColor: (params.length === 1 ? color : param.color) + '33',
-          borderWidth: 1.5,
-          borderDash: INST_DASH[instIdx % INST_DASH.length],
-          pointRadius: 0,
-          tension: 0.3,
-          spanGaps: true,
-        });
+        const minKey = `${key}_min` as keyof AggBucket;
+        const maxKey = `${key}_max` as keyof AggBucket;
+        const cType = paramChartType(key);
+        const baseColor = filteredInstIds.length > 1 && params.length === 1
+          ? INST_COLORS[instIdx % INST_COLORS.length]
+          : param.color;
+        const label = name ? `${name}: ${param.short}` : param.label;
+
+        if (cType === 'bar') {
+          // Min-max floating bars: base color from 0→min, spread color from min→max
+          datasets.push({
+            type: 'bar' as const,
+            label: `${label} (мин)`,
+            data: bks.map((b) => {
+              const mn = b[minKey] as number;
+              return Math.abs(mn) >= 999 ? null : mn;
+            }),
+            backgroundColor: baseColor + '99',
+            borderColor: baseColor,
+            borderWidth: 0,
+            barPercentage: 1.0,
+            categoryPercentage: 1.0,
+            order: 2,
+          });
+          datasets.push({
+            type: 'bar' as const,
+            label: `${label} (макс)`,
+            data: bks.map((b) => {
+              const mx = b[maxKey] as number;
+              return Math.abs(mx) >= 999 ? null : mx;
+            }),
+            backgroundColor: baseColor + '35',
+            borderColor: baseColor + '60',
+            borderWidth: 0,
+            barPercentage: 1.0,
+            categoryPercentage: 1.0,
+            order: 1,
+          });
+        } else {
+          // Line chart showing MAX value (for source, voltage, etc.)
+          datasets.push({
+            type: 'line' as const,
+            label,
+            data: bks.map((b) => {
+              const mx = b[maxKey] as number;
+              return Math.abs(mx) >= 999 ? null : mx;
+            }),
+            borderColor: baseColor,
+            backgroundColor: baseColor + '22',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0.1,
+            fill: false,
+            spanGaps: true,
+            borderDash: filteredInstIds.length > 1 ? INST_DASH[instIdx % INST_DASH.length] : [],
+          });
+        }
       });
     });
     return datasets;
   };
 
-  // Labels: use first active instrument's timestamps
-  const chartLabels = useMemo(() => {
+  const aggChartOptions = (title: string, hasBar: boolean) => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false as const,
+    interaction: { mode: 'index' as const, intersect: false },
+    plugins: {
+      legend: { display: true, position: 'top' as const, labels: { boxWidth: 14, font: { size: 11 } } },
+      title: { display: !!title, text: title },
+      zoom: {
+        pan: { enabled: true, mode: 'x' as const },
+        zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' as const },
+      },
+    },
+    scales: {
+      x: {
+        ticks: { maxTicksLimit: 20, maxRotation: 45 },
+        ...(hasBar ? { stacked: true } : {}),
+      },
+      y: {
+        ...(hasBar ? { stacked: false } : {}),
+      },
+    },
+  });
+
+  // ── Table-mode datasets (kept from old code for table view) ──
+  const tableLabels = useMemo(() => {
     const filteredInstIds = instrumentIds.filter((id) => activeInstruments.includes(id));
     const refMeas = filteredInstIds.length > 1
       ? measurements.filter((m) => m.instrument_id === filteredInstIds[0])
@@ -292,25 +398,9 @@ export default function GraphsTab({ experimentId }: Props) {
     });
   }, [measurements, instrumentIds, activeInstruments]);
 
-  const chartOptions = (title: string) => ({
-    responsive: true,
-    maintainAspectRatio: false,
-    interaction: { mode: 'index' as const, intersect: false },
-    plugins: {
-      legend: { display: true, position: 'top' as const },
-      title: { display: !!title, text: title },
-      zoom: {
-        pan: { enabled: true, mode: 'x' as const },
-        zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' as const },
-      },
-    },
-    scales: { x: { ticks: { maxTicksLimit: 20, maxRotation: 45 } } },
-  });
-
   const visibleParams = PARAMS.filter((p) => activeParams.includes(p.key));
   const totalPages = Math.max(1, Math.ceil(filteredTotal / perPage));
 
-  // Time range labels for slider
   const rangeFromLabel = timeMin
     ? fmtTime(new Date(new Date(timeMin).getTime() + (timeRange[0] / 100) * durationMs).toISOString())
     : '';
@@ -318,8 +408,84 @@ export default function GraphsTab({ experimentId }: Props) {
     ? fmtTime(new Date(new Date(timeMin).getTime() + (timeRange[1] / 100) * durationMs).toISOString())
     : '';
 
+  // ── Downloads ──
+  const downloadAllChartsPng = () => {
+    if (chartMode === 'combined' && combinedChartRef.current) {
+      downloadChartPng(combinedChartRef as any, `chart_${selectedExpId}.png`);
+    } else {
+      // For separate mode, capture each canvas and stitch them
+      const refs = separateChartRefs.current;
+      const keys = activeParams.filter((k) => refs[k]);
+      if (keys.length === 0) return;
+      if (keys.length === 1) {
+        const chart = refs[keys[0]];
+        if (chart) {
+          const url = chart.toBase64Image('image/png', 1);
+          const a = document.createElement('a'); a.href = url; a.download = `chart_${keys[0]}_${selectedExpId}.png`; a.click();
+        }
+        return;
+      }
+      // Stitch multiple charts vertically
+      const canvases = keys.map((k) => refs[k]!.canvas);
+      const totalH = canvases.reduce((sum, c) => sum + c.height, 0);
+      const maxW = Math.max(...canvases.map((c) => c.width));
+      const offscreen = document.createElement('canvas');
+      offscreen.width = maxW; offscreen.height = totalH;
+      const ctx = offscreen.getContext('2d')!;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, maxW, totalH);
+      let y = 0;
+      canvases.forEach((c) => { ctx.drawImage(c, 0, y); y += c.height; });
+      offscreen.toBlob((blob) => {
+        if (blob) downloadBlob(blob, `charts_${selectedExpId}.png`);
+      });
+    }
+  };
+
+  const downloadTableScreenshot = () => {
+    const el = tableContainerRef.current;
+    if (!el) return;
+    // Use native canvas approach: render table to image via SVG foreignObject
+    const html = el.outerHTML;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${el.scrollWidth}" height="${el.scrollHeight}">
+      <foreignObject width="100%" height="100%">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Roboto,sans-serif;font-size:13px">${html}</div>
+      </foreignObject>
+    </svg>`;
+    const blob = new Blob([svg], { type: 'image/svg+xml' });
+    downloadBlob(blob, `table_${selectedExpId}.svg`);
+  };
+
+  const downloadCsv = async () => {
+    if (!selectedExpId) return;
+    // Fetch all data (no pagination) in batches
+    const batchSize = 10000;
+    let allRows: Measurement[] = [];
+    let pg = 1;
+    let hasMore = true;
+    while (hasMore) {
+      try {
+        const res = await getExperimentData(selectedExpId, { page: pg, per_page: batchSize });
+        const batch = res.data.measurements || [];
+        allRows = allRows.concat(batch);
+        hasMore = batch.length === batchSize;
+        pg++;
+      } catch { hasMore = false; }
+    }
+    if (allRows.length === 0) return;
+    const header = 'id,experiment_id,instrument_id,recorded_at,voltage,current,charge,resistance,temperature,humidity,source,math_value,error_code';
+    const lines = allRows.map((m) =>
+      `${m.id},${m.experiment_id},${m.instrument_id},${m.recorded_at},${m.voltage},${m.current},${m.charge},${m.resistance},${m.temperature},${m.humidity},${m.source},${m.math_value},${m.error_code}`
+    );
+    const csv = header + '\n' + lines.join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    downloadBlob(blob, `experiment_${selectedExpId}.csv`);
+  };
+
+  const hasAggData = aggBuckets.length > 0;
+
   return (
-    <Box>
+    <Box ref={chartContainerRef}>
       {/* Row 1: experiment selector + view toggle */}
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1 }} alignItems={{ md: 'center' }}>
         <FormControl sx={{ minWidth: 300 }} size="small">
@@ -353,10 +519,10 @@ export default function GraphsTab({ experimentId }: Props) {
           <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
             {total.toLocaleString()} изм.
             {durationMs > 0 && <> | {fmtMs(durationMs)}</>}
+            {viewMode === 'chart' && <> | {chartMaxPoints}px</>}
           </Typography>
         )}
 
-        {/* Experiment settings summary */}
         {experiment?.settings_json && experiment.settings_json !== '{}' && (() => {
           try {
             const settings = JSON.parse(experiment.settings_json) as Record<string, InstrumentSettings>;
@@ -385,9 +551,8 @@ export default function GraphsTab({ experimentId }: Props) {
 
       {selectedExpId && !loading && (viewMode === 'chart' || viewMode === 'table') && (
         <>
-          {/* Controls bar: params + time range + step */}
+          {/* Controls bar */}
           <Paper sx={{ p: 1, mb: 1 }}>
-            {/* Instrument chips (if multiple) */}
             {instrumentIds.length > 1 && (
               <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center', mb: 0.5 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>Приборы:</Typography>
@@ -407,7 +572,6 @@ export default function GraphsTab({ experimentId }: Props) {
               </Box>
             )}
 
-            {/* Parameter chips */}
             <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center', mb: 1 }}>
               <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>Параметры:</Typography>
               {PARAMS.map((p) => (
@@ -426,7 +590,6 @@ export default function GraphsTab({ experimentId }: Props) {
               ))}
             </Box>
 
-            {/* Time range slider */}
             {durationMs > 0 && (
               <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ minWidth: 65, textAlign: 'right' }}>
@@ -450,20 +613,18 @@ export default function GraphsTab({ experimentId }: Props) {
               </Stack>
             )}
 
-            {/* Step selector + info */}
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5, flexWrap: 'wrap' }}>
-              <Typography variant="caption" color="text.secondary">Интервал:</Typography>
-              <ToggleButtonGroup value={intervalSec} exclusive size="small"
-                onChange={(_, v) => { if (v !== null) setIntervalSec(v); }}>
-                {availableIntervals.map((o) => (
-                  <ToggleButton key={o.sec} value={o.sec} sx={{ px: 1, py: 0.25, fontSize: '0.75rem' }}>
-                    {o.label}
-                  </ToggleButton>
-                ))}
-              </ToggleButtonGroup>
-
               {viewMode === 'table' && (
                 <>
+                  <Typography variant="caption" color="text.secondary">Интервал:</Typography>
+                  <ToggleButtonGroup value={intervalSec} exclusive size="small"
+                    onChange={(_, v) => { if (v !== null) setIntervalSec(v); }}>
+                    {availableIntervals.map((o) => (
+                      <ToggleButton key={o.sec} value={o.sec} sx={{ px: 1, py: 0.25, fontSize: '0.75rem' }}>
+                        {o.label}
+                      </ToggleButton>
+                    ))}
+                  </ToggleButtonGroup>
                   <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>На стр:</Typography>
                   <Select value={perPage} size="small" variant="standard"
                     onChange={(e) => setPerPage(e.target.value as number)}
@@ -475,15 +636,32 @@ export default function GraphsTab({ experimentId }: Props) {
                 </>
               )}
 
-              <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-                {filteredTotal.toLocaleString()} строк
-                {measHz > 0 && <> | {measHz.toFixed(1)} Гц</>}
-                {intervalSec > 0 && <> | шаг {intervalSec}с (×{step})</>}
-              </Typography>
+              <Box sx={{ ml: 'auto', display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                <Typography variant="caption" color="text.secondary">
+                  {total.toLocaleString()} строк
+                  {measHz > 0 && <> | {measHz.toFixed(1)} Гц</>}
+                </Typography>
+                {viewMode === 'chart' && (
+                  <MuiTooltip title="Скачать скриншот графиков">
+                    <IconButton size="small" onClick={downloadAllChartsPng}><PhotoCameraIcon fontSize="small" /></IconButton>
+                  </MuiTooltip>
+                )}
+                {viewMode === 'table' && (
+                  <>
+                    <MuiTooltip title="Скачать скриншот таблицы (SVG)">
+                      <IconButton size="small" onClick={downloadTableScreenshot}><PhotoCameraIcon fontSize="small" /></IconButton>
+                    </MuiTooltip>
+                    <MuiTooltip title="Скачать все замеры в CSV">
+                      <IconButton size="small" onClick={downloadCsv}><DownloadIcon fontSize="small" /></IconButton>
+                    </MuiTooltip>
+                  </>
+                )}
+              </Box>
             </Stack>
           </Paper>
 
-          {measurements.length > 0 && viewMode === 'chart' && (
+          {/* ── Chart view (aggregate) ── */}
+          {hasAggData && viewMode === 'chart' && (
             <>
               <ToggleButtonGroup
                 value={chartMode} exclusive onChange={(_, v) => v && setChartMode(v)}
@@ -495,15 +673,26 @@ export default function GraphsTab({ experimentId }: Props) {
 
               {chartMode === 'combined' ? (
                 <Paper sx={{ p: 1, height: { xs: 300, md: 450 } }}>
-                  <Line data={{ labels: chartLabels, datasets: makeDatasets(activeParams) }} options={chartOptions('')} />
+                  <Chart
+                    ref={combinedChartRef as any}
+                    type="line"
+                    data={{ labels: aggLabels, datasets: makeAggDatasets(activeParams) }}
+                    options={aggChartOptions('', activeParams.includes('current'))}
+                  />
                 </Paper>
               ) : (
                 <Stack spacing={1.5}>
                   {activeParams.map((key) => {
                     const param = PARAMS.find((p) => p.key === key)!;
+                    const hasBar = paramChartType(key) === 'bar';
                     return (
                       <Paper key={key} sx={{ p: 1, height: { xs: 220, md: 300 } }}>
-                        <Line data={{ labels: chartLabels, datasets: makeDatasets([key]) }} options={chartOptions(param.label)} />
+                        <Chart
+                          ref={(ref) => { separateChartRefs.current[key] = ref; }}
+                          type={hasBar ? 'bar' : 'line'}
+                          data={{ labels: aggLabels, datasets: makeAggDatasets([key]) }}
+                          options={aggChartOptions(param.label, hasBar)}
+                        />
                       </Paper>
                     );
                   })}
@@ -512,9 +701,10 @@ export default function GraphsTab({ experimentId }: Props) {
             </>
           )}
 
+          {/* ── Table view ── */}
           {measurements.length > 0 && viewMode === 'table' && (
             <>
-              <TableContainer component={Paper} sx={{ maxHeight: { xs: 400, md: 550 } }}>
+              <TableContainer ref={tableContainerRef} component={Paper} sx={{ maxHeight: { xs: 400, md: 550 } }}>
                 <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow>
@@ -556,7 +746,6 @@ export default function GraphsTab({ experimentId }: Props) {
                 </Table>
               </TableContainer>
 
-              {/* Pagination */}
               {totalPages > 1 && (
                 <Stack direction="row" justifyContent="center" alignItems="center" spacing={1} sx={{ mt: 1 }}>
                   <IconButton size="small" disabled={page <= 1} onClick={() => setPage(page - 1)}>
@@ -578,7 +767,14 @@ export default function GraphsTab({ experimentId }: Props) {
             </>
           )}
 
-          {measurements.length === 0 && !error && (
+          {/* Need to load table data when switching to table mode */}
+          {viewMode === 'table' && measurements.length === 0 && !loading && hasAggData && (
+            <Paper sx={{ p: 3, textAlign: 'center' }}>
+              <Button variant="outlined" onClick={fetchData}>Загрузить табличные данные</Button>
+            </Paper>
+          )}
+
+          {!hasAggData && measurements.length === 0 && !error && (
             <Paper sx={{ p: 3, textAlign: 'center' }}>
               <Typography color="text.secondary">Нет данных в выбранном диапазоне</Typography>
             </Paper>

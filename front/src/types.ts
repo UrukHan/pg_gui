@@ -81,3 +81,27 @@ export interface Measurement {
   math_value: number;
   error_code: number;
 }
+
+export interface AggBucket {
+  bucket: number;
+  instrument_id: number;
+  recorded_at: string;
+  recorded_end: string;
+  point_count: number;
+  voltage_min: number;
+  voltage_max: number;
+  current_min: number;
+  current_max: number;
+  charge_min: number;
+  charge_max: number;
+  resistance_min: number;
+  resistance_max: number;
+  temperature_min: number;
+  temperature_max: number;
+  humidity_min: number;
+  humidity_max: number;
+  source_min: number;
+  source_max: number;
+  math_value_min: number;
+  math_value_max: number;
+}
