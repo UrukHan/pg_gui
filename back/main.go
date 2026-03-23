@@ -89,6 +89,7 @@ func main() {
 		auth.GET("/experiments/:id/data", controllers.GetExperimentData)
 		auth.GET("/experiments/:id/status", controllers.ExperimentStatusCheck)
 		auth.GET("/experiments/:id/video", controllers.GetExperimentVideo)
+		auth.GET("/experiments/:id/csv", controllers.ExportExperimentCSV)
 		auth.DELETE("/experiments/:id", controllers.DeleteExperiment)
 
 		// Start / Stop measurement

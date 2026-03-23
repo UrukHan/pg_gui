@@ -502,30 +502,14 @@ export default function GraphsTab({ experimentId }: Props) {
     downloadBlob(blob, `table_${selectedExpId}.svg`);
   };
 
-  const downloadCsv = async () => {
+  const downloadCsv = () => {
     if (!selectedExpId) return;
-    // Fetch all data (no pagination) in batches
-    const batchSize = 10000;
-    let allRows: Measurement[] = [];
-    let pg = 1;
-    let hasMore = true;
-    while (hasMore) {
-      try {
-        const res = await getExperimentData(selectedExpId, { page: pg, per_page: batchSize });
-        const batch = res.data.measurements || [];
-        allRows = allRows.concat(batch);
-        hasMore = batch.length === batchSize;
-        pg++;
-      } catch { hasMore = false; }
-    }
-    if (allRows.length === 0) return;
-    const header = 'id,experiment_id,instrument_id,recorded_at,voltage,current,charge,resistance,temperature,humidity,source,math_value,error_code';
-    const lines = allRows.map((m) =>
-      `${m.id},${m.experiment_id},${m.instrument_id},${m.recorded_at},${m.voltage},${m.current},${m.charge},${m.resistance},${m.temperature},${m.humidity},${m.source},${m.math_value},${m.error_code}`
-    );
-    const csv = header + '\n' + lines.join('\n');
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
-    downloadBlob(blob, `experiment_${selectedExpId}.csv`);
+    // Direct download from backend streaming CSV endpoint
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
+    const base = typeof window !== 'undefined'
+      ? `${window.location.protocol}//${window.location.hostname}:8080`
+      : '';
+    window.open(`${base}/experiments/${selectedExpId}/csv?token=${token}`, '_blank');
   };
 
   const hasAggData = aggBuckets.length > 0;

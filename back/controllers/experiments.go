@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -279,6 +280,54 @@ func GetExperimentData(c *gin.Context) {
 		"time_min":       stats.TimeMin,
 		"time_max":       stats.TimeMax,
 	})
+}
+
+func ExportExperimentCSV(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	user := middleware.GetCurrentUser(c)
+	var exp models.Experiment
+	if err := database.DB.First(&exp, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "experiment not found"})
+		return
+	}
+
+	if user.Role != models.RoleAdmin && user.Permission == models.PermReadOwn && exp.UserID != user.ID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	filename := fmt.Sprintf("experiment_%d.csv", id)
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	// BOM for Excel UTF-8 detection
+	c.Writer.Write([]byte("\xEF\xBB\xBF"))
+	c.Writer.Write([]byte("id,experiment_id,instrument_id,recorded_at,voltage,current,charge,resistance,temperature,humidity,source,math_value,error_code\n"))
+
+	const batchSize = 5000
+	var lastID uint = 0
+	for {
+		var rows []models.Measurement
+		database.DB.Where("experiment_id = ? AND id > ?", id, lastID).
+			Order("id ASC").Limit(batchSize).Find(&rows)
+		if len(rows) == 0 {
+			break
+		}
+		for _, m := range rows {
+			line := fmt.Sprintf("%d,%d,%d,%s,%g,%g,%g,%g,%g,%g,%g,%g,%d\n",
+				m.ID, m.ExperimentID, m.InstrumentID,
+				m.RecordedAt.Format(time.RFC3339Nano),
+				m.Voltage, m.Current, m.Charge, m.Resistance,
+				m.Temperature, m.Humidity, m.Source, m.MathValue, m.ErrorCode)
+			c.Writer.Write([]byte(line))
+		}
+		c.Writer.Flush()
+		lastID = rows[len(rows)-1].ID
+	}
 }
 
 func DeleteExperiment(c *gin.Context) {
