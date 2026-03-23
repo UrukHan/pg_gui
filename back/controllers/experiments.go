@@ -301,7 +301,18 @@ func ExportExperimentCSV(c *gin.Context) {
 		return
 	}
 
+	// Optional instrument_id filter
+	instFilter := 0
+	if instStr := c.Query("instrument_id"); instStr != "" {
+		if v, err := strconv.Atoi(instStr); err == nil {
+			instFilter = v
+		}
+	}
+
 	filename := fmt.Sprintf("experiment_%d.csv", id)
+	if instFilter > 0 {
+		filename = fmt.Sprintf("experiment_%d_inst_%d.csv", id, instFilter)
+	}
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	// BOM for Excel UTF-8 detection + sep hint for Excel auto-delimiter
@@ -312,8 +323,11 @@ func ExportExperimentCSV(c *gin.Context) {
 	var lastID uint = 0
 	for {
 		var rows []models.Measurement
-		database.DB.Where("experiment_id = ? AND id > ?", id, lastID).
-			Order("id ASC").Limit(batchSize).Find(&rows)
+		q := database.DB.Where("experiment_id = ? AND id > ?", id, lastID)
+		if instFilter > 0 {
+			q = q.Where("instrument_id = ?", instFilter)
+		}
+		q.Order("id ASC").Limit(batchSize).Find(&rows)
 		if len(rows) == 0 {
 			break
 		}

@@ -5,7 +5,7 @@ import {
   Box, Typography, Paper, CircularProgress, Alert, FormControl,
   InputLabel, Select, MenuItem, Stack, Chip, ToggleButton, ToggleButtonGroup,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Slider, IconButton, Pagination, Button, Tooltip as MuiTooltip,
+  Slider, IconButton, Pagination, Button, Tooltip as MuiTooltip, Menu,
 } from '@mui/material';
 import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
@@ -583,14 +583,17 @@ export default function GraphsTab({ experimentId }: Props) {
     downloadBlob(blob, `table_${selectedExpId}.svg`);
   };
 
-  const downloadCsv = () => {
+  const [csvMenuAnchor, setCsvMenuAnchor] = useState<null | HTMLElement>(null);
+  const downloadCsv = (instrumentId?: number) => {
     if (!selectedExpId) return;
-    // Direct download from backend streaming CSV endpoint
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
     const base = typeof window !== 'undefined'
       ? `${window.location.protocol}//${window.location.hostname}:8080`
       : '';
-    window.open(`${base}/experiments/${selectedExpId}/csv?token=${token}`, '_blank');
+    let url = `${base}/experiments/${selectedExpId}/csv?token=${token}`;
+    if (instrumentId != null) url += `&instrument_id=${instrumentId}`;
+    window.open(url, '_blank');
+    setCsvMenuAnchor(null);
   };
 
   const hasAggData = aggBuckets.length > 0;
@@ -763,9 +766,15 @@ export default function GraphsTab({ experimentId }: Props) {
                     <MuiTooltip title="Скачать скриншот таблицы (SVG)">
                       <IconButton size="small" onClick={downloadTableScreenshot}><PhotoCameraIcon fontSize="small" /></IconButton>
                     </MuiTooltip>
-                    <MuiTooltip title="Скачать все замеры в CSV">
-                      <IconButton size="small" onClick={downloadCsv}><DownloadIcon fontSize="small" /></IconButton>
+                    <MuiTooltip title="Скачать CSV">
+                      <IconButton size="small" onClick={(e) => setCsvMenuAnchor(e.currentTarget)}><DownloadIcon fontSize="small" /></IconButton>
                     </MuiTooltip>
+                    <Menu anchorEl={csvMenuAnchor} open={Boolean(csvMenuAnchor)} onClose={() => setCsvMenuAnchor(null)}>
+                      <MenuItem onClick={() => downloadCsv()}>Все приборы</MenuItem>
+                      {instrumentIds.map((id) => (
+                        <MenuItem key={id} onClick={() => downloadCsv(id)}>{instName(id)}</MenuItem>
+                      ))}
+                    </Menu>
                   </>
                 )}
               </Box>
