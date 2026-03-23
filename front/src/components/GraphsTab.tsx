@@ -437,29 +437,7 @@ export default function GraphsTab({ experimentId }: Props) {
         display: true, position: 'top' as const,
         labels: {
           boxWidth: 14, font: { size: 11 },
-          // Hide (баз.) datasets from legend — only show the main (макс.) entry
           filter: (item: any) => !item.text?.includes('(баз.)'),
-        },
-        // Click toggles both layers (макс. + баз.) together
-        onClick: (_e: any, legendItem: any, legend: any) => {
-          const chart = legend.chart;
-          const ci = legendItem.datasetIndex;
-          const ds = chart.data.datasets[ci];
-          const lbl = ds?.label || '';
-          // Find paired dataset: if this is (макс.), find (баз.) with same prefix, and vice versa
-          const prefix = lbl.replace(/ \((макс\.|баз\.)\)$/, '').replace(/ \(макс\.\)$/, '');
-          chart.data.datasets.forEach((d: any, i: number) => {
-            if (d.label?.startsWith(prefix) && (d.label.includes('(макс.)') || d.label.includes('(баз.)'))) {
-              const meta = chart.getDatasetMeta(i);
-              meta.hidden = !chart.isDatasetVisible(ci);
-            }
-          });
-          // Also handle non-current datasets (no suffix)
-          if (!lbl.includes('(макс.)') && !lbl.includes('(баз.)')) {
-            const meta = chart.getDatasetMeta(ci);
-            meta.hidden = meta.hidden === null ? true : !meta.hidden;
-          }
-          chart.update();
         },
       },
       tooltip: {
