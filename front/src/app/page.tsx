@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box, Paper, TextField, Button, Typography, CircularProgress,
   BottomNavigation, BottomNavigationAction, AppBar, Toolbar, IconButton, Menu, MenuItem,
@@ -12,7 +12,9 @@ import PeopleIcon from '@mui/icons-material/People';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PersonIcon from '@mui/icons-material/Person';
 import Image from 'next/image';
+import StorageIcon from '@mui/icons-material/Storage';
 import { useAuth } from '@/context/AuthContext';
+import { getDiskUsage } from '@/api';
 import InstrumentsTab from '@/components/InstrumentsTab';
 import ExperimentsTab from '@/components/ExperimentsTab';
 import UsersTab from '@/components/UsersTab';
@@ -27,6 +29,18 @@ export default function Home() {
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+
+  // Disk usage polling
+  const [disk, setDisk] = useState<{ used_pct: number; free_bytes: number } | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    const fetch = () => { getDiskUsage().then((r) => setDisk(r.data)).catch(() => {}); };
+    fetch();
+    const iv = setInterval(fetch, 30000);
+    return () => clearInterval(iv);
+  }, [user]);
+  const diskColor = disk ? (disk.used_pct > 90 ? '#f44336' : disk.used_pct > 75 ? '#ff9800' : '#4caf50') : '#888';
+  const diskFreeGB = disk ? (disk.free_bytes / 1073741824).toFixed(1) : '?';
 
   const handleLogin = async () => {
     setLoginLoading(true);
@@ -137,6 +151,19 @@ export default function Home() {
               {t.label}
             </Button>
           ))}
+
+          {/* Disk usage indicator */}
+          {disk && (
+            <Box sx={{ display: 'flex', alignItems: 'center', mr: 1, px: 1, py: 0.25, borderRadius: 1, bgcolor: diskColor + '22', border: `1px solid ${diskColor}55` }}>
+              <StorageIcon sx={{ fontSize: 16, color: diskColor, mr: 0.5 }} />
+              <Typography variant="caption" sx={{ color: diskColor, fontWeight: 600, lineHeight: 1 }}>
+                {disk.used_pct}%
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#fff9', ml: 0.5, fontSize: '0.65rem', lineHeight: 1 }}>
+                {diskFreeGB}GB св.
+              </Typography>
+            </Box>
+          )}
 
           <IconButton color="inherit" onClick={(e) => setAnchorEl(e.currentTarget)}>
             <PersonIcon />

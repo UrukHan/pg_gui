@@ -160,4 +160,7 @@ export const getExperimentVideoUrl = (id: number): string => {
   return `${getBaseURL()}/experiments/${id}/video?token=${token}`;
 };
 
+export const getDiskUsage = () =>
+  API.get<{ total_bytes: number; free_bytes: number; used_bytes: number; used_pct: number }>("/system/disk");
+
 export default API;

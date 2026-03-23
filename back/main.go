@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -49,6 +51,28 @@ func main() {
 
 	// Health
 	r.GET("/health", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+
+	// System disk usage (for header indicator)
+	r.GET("/system/disk", func(c *gin.Context) {
+		var stat syscall.Statfs_t
+		if err := syscall.Statfs("/", &stat); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		total := stat.Blocks * uint64(stat.Bsize)
+		free := stat.Bavail * uint64(stat.Bsize)
+		used := total - free
+		pct := float64(0)
+		if total > 0 {
+			pct = float64(used) / float64(total) * 100
+		}
+		c.JSON(200, gin.H{
+			"total_bytes": total,
+			"free_bytes":  free,
+			"used_bytes":  used,
+			"used_pct":    math.Round(pct*10) / 10,
+		})
+	})
 
 	// Auth (public)
 	r.POST("/auth/login", controllers.Login)
