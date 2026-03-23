@@ -419,13 +419,59 @@ export default function GraphsTab({ experimentId }: Props) {
     setCommittedTimeRange([newFrom, newTo]);
   }, [timeMin, timeMax, durationMs, committedTimeRange]);
 
+  const fmtSci = (v: number | null | undefined): string => {
+    if (v == null) return '—';
+    if (v === 0) return '0';
+    if (Math.abs(v) < 0.001) return v.toExponential(3);
+    if (Math.abs(v) >= 1e6) return v.toExponential(3);
+    return v.toPrecision(4);
+  };
+
   const aggChartOptions = (title: string) => ({
     responsive: true,
     maintainAspectRatio: false,
     animation: false as const,
     interaction: { mode: 'index' as const, intersect: false },
     plugins: {
-      legend: { display: true, position: 'top' as const, labels: { boxWidth: 14, font: { size: 11 } } },
+      legend: {
+        display: true, position: 'top' as const,
+        labels: {
+          boxWidth: 14, font: { size: 11 },
+          // Hide (баз.) datasets from legend — only show the main (макс.) entry
+          filter: (item: any) => !item.text?.includes('(баз.)'),
+        },
+        // Click toggles both layers (макс. + баз.) together
+        onClick: (_e: any, legendItem: any, legend: any) => {
+          const chart = legend.chart;
+          const ci = legendItem.datasetIndex;
+          const ds = chart.data.datasets[ci];
+          const lbl = ds?.label || '';
+          // Find paired dataset: if this is (макс.), find (баз.) with same prefix, and vice versa
+          const prefix = lbl.replace(/ \((макс\.|баз\.)\)$/, '').replace(/ \(макс\.\)$/, '');
+          chart.data.datasets.forEach((d: any, i: number) => {
+            if (d.label?.startsWith(prefix) && (d.label.includes('(макс.)') || d.label.includes('(баз.)'))) {
+              const meta = chart.getDatasetMeta(i);
+              meta.hidden = !chart.isDatasetVisible(ci);
+            }
+          });
+          // Also handle non-current datasets (no suffix)
+          if (!lbl.includes('(макс.)') && !lbl.includes('(баз.)')) {
+            const meta = chart.getDatasetMeta(ci);
+            meta.hidden = meta.hidden === null ? true : !meta.hidden;
+          }
+          chart.update();
+        },
+      },
+      tooltip: {
+        callbacks: {
+          label: (ctx: any) => {
+            const label = ctx.dataset.label || '';
+            if (label.includes('(баз.)')) return null; // hide duplicate tooltip
+            const v = ctx.parsed?.y;
+            return `${label}: ${fmtSci(v)}`;
+          },
+        },
+      },
       title: { display: !!title, text: title },
       filler: { propagate: true },
       zoom: {
@@ -440,7 +486,11 @@ export default function GraphsTab({ experimentId }: Props) {
     },
     scales: {
       x: { ticks: { maxTicksLimit: 20, maxRotation: 45 } },
-      y: {},
+      y: {
+        ticks: {
+          callback: (v: any) => fmtSci(v),
+        },
+      },
     },
   });
 
