@@ -290,17 +290,16 @@ export default function GraphsTab({ experimentId }: Props) {
     return labels;
   }, [aggByInstrument, instrumentIds, activeInstruments]);
 
-  // Build aggregate datasets for given params — filled area charts (no gaps)
-  const makeAggDatasets = (params: ParamKey[]) => {
-    const filteredInstIds = instrumentIds.filter((id) => activeInstruments.includes(id));
-    const multiInst = filteredInstIds.length > 1;
+  // Build aggregate datasets — memoized to avoid re-creation during slider drag
+  const buildAggDatasets = useCallback((params: ParamKey[], instIds: number[], agg: Record<number, AggBucket[]>) => {
+    const multiInst = instIds.length > 1;
     const datasets: any[] = [];
 
     // Sort instruments: largest avg |current_max| renders first (behind)
     const instAvgAbs: Record<number, number> = {};
     if (multiInst) {
-      filteredInstIds.forEach((instId) => {
-        const bks = aggByInstrument[instId] || [];
+      instIds.forEach((instId) => {
+        const bks = agg[instId] || [];
         if (bks.length === 0) { instAvgAbs[instId] = 0; return; }
         let sum = 0;
         bks.forEach((b) => { sum += Math.abs(b.current_max); });
@@ -308,12 +307,12 @@ export default function GraphsTab({ experimentId }: Props) {
       });
     }
     const sortedInstIds = multiInst
-      ? [...filteredInstIds].sort((a, b) => (instAvgAbs[b] || 0) - (instAvgAbs[a] || 0))
-      : filteredInstIds;
+      ? [...instIds].sort((a, b) => (instAvgAbs[b] || 0) - (instAvgAbs[a] || 0))
+      : instIds;
 
     sortedInstIds.forEach((instId) => {
-      const bks = aggByInstrument[instId] || [];
-      const origIdx = filteredInstIds.indexOf(instId);
+      const bks = agg[instId] || [];
+      const origIdx = instIds.indexOf(instId);
       const name = multiInst ? instName(instId) : '';
 
       params.forEach((key) => {
@@ -326,11 +325,29 @@ export default function GraphsTab({ experimentId }: Props) {
           : param.color;
         const label = name ? `${name}: ${param.short}` : param.label;
 
-        if (isCurrent && !multiInst) {
-          // Single instrument current: two filled areas (0→min solid, min→max lighter)
+        if (isCurrent) {
+          // Layered fill: max area (lighter, behind) + min area (solid, on top)
+          // Max fill: 0→max (lighter color, drawn first = behind)
           datasets.push({
             type: 'line' as const,
-            label: `${param.label} (баз.)`,
+            label: multiInst ? label : `${param.label} (макс.)`,
+            data: bks.map((b) => {
+              const mx = b[maxKey] as number;
+              return Math.abs(mx) >= 999 ? null : mx;
+            }),
+            borderColor: baseColor + '40',
+            backgroundColor: baseColor + '30',
+            borderWidth: 0,
+            pointRadius: 0,
+            tension: 0,
+            fill: 'origin',
+            spanGaps: true,
+            order: 10 + origIdx,
+          });
+          // Min fill: 0→min (solid color, drawn on top)
+          datasets.push({
+            type: 'line' as const,
+            label: multiInst ? `${label} (баз.)` : `${param.label} (баз.)`,
             data: bks.map((b) => {
               const mn = b[minKey] as number;
               return Math.abs(mn) >= 999 ? null : mn;
@@ -342,55 +359,7 @@ export default function GraphsTab({ experimentId }: Props) {
             tension: 0,
             fill: 'origin',
             spanGaps: true,
-            order: 2,
-          });
-          datasets.push({
-            type: 'line' as const,
-            label: `${param.label} (макс.)`,
-            data: bks.map((b) => {
-              const mx = b[maxKey] as number;
-              return Math.abs(mx) >= 999 ? null : mx;
-            }),
-            borderColor: baseColor + '60',
-            backgroundColor: baseColor + '35',
-            borderWidth: 0,
-            pointRadius: 0,
-            tension: 0,
-            fill: '-1',
-            spanGaps: true,
-            order: 1,
-          });
-        } else if (isCurrent && multiInst) {
-          // Multi-instrument current: one filled area [min→max] per instrument
-          datasets.push({
-            type: 'line' as const,
-            label: `${label} (min)`,
-            data: bks.map((b) => {
-              const mn = b[minKey] as number;
-              return Math.abs(mn) >= 999 ? null : mn;
-            }),
-            borderColor: 'transparent',
-            backgroundColor: 'transparent',
-            borderWidth: 0,
-            pointRadius: 0,
-            tension: 0,
-            fill: false,
-            spanGaps: true,
-          });
-          datasets.push({
-            type: 'line' as const,
-            label,
-            data: bks.map((b) => {
-              const mx = b[maxKey] as number;
-              return Math.abs(mx) >= 999 ? null : mx;
-            }),
-            borderColor: baseColor,
-            backgroundColor: baseColor + '50',
-            borderWidth: 0.5,
-            pointRadius: 0,
-            tension: 0,
-            fill: '-1',
-            spanGaps: true,
+            order: 5 + origIdx,
           });
         } else {
           // Other params: line chart showing MAX value
@@ -414,7 +383,20 @@ export default function GraphsTab({ experimentId }: Props) {
       });
     });
     return datasets;
-  };
+  }, [instName]);
+
+  // Memoized chart data objects — prevents re-creation during slider drag
+  const combinedChartData = useMemo(() => ({
+    labels: aggLabels,
+    datasets: buildAggDatasets(activeParams, instrumentIds.filter((id) => activeInstruments.includes(id)), aggByInstrument),
+  }), [aggLabels, activeParams, instrumentIds, activeInstruments, aggByInstrument, buildAggDatasets]);
+
+  const separateChartData = useMemo(() => {
+    const filteredInstIds = instrumentIds.filter((id) => activeInstruments.includes(id));
+    return Object.fromEntries(activeParams.map((key) => [
+      key, { labels: aggLabels, datasets: buildAggDatasets([key], filteredInstIds, aggByInstrument) },
+    ]));
+  }, [aggLabels, activeParams, instrumentIds, activeInstruments, aggByInstrument, buildAggDatasets]);
 
   // When zoom/pan completes, map visible category range → time range → re-fetch
   const handleZoomPanComplete = useCallback(({ chart }: { chart: ChartJS }) => {
@@ -738,7 +720,7 @@ export default function GraphsTab({ experimentId }: Props) {
                   <Chart
                     ref={combinedChartRef as any}
                     type="line"
-                    data={{ labels: aggLabels, datasets: makeAggDatasets(activeParams) }}
+                    data={combinedChartData}
                     options={aggChartOptions('')}
                   />
                 </Paper>
@@ -751,7 +733,7 @@ export default function GraphsTab({ experimentId }: Props) {
                         <Chart
                           ref={(ref: any) => { separateChartRefs.current[key] = ref ?? null; }}
                           type="line"
-                          data={{ labels: aggLabels, datasets: makeAggDatasets([key]) }}
+                          data={separateChartData[key] || { labels: [], datasets: [] }}
                           options={aggChartOptions(param.label)}
                         />
                       </Paper>
