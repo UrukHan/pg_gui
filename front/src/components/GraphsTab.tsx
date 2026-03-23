@@ -14,7 +14,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController,
-  Title, Tooltip, Legend, TimeScale,
+  Filler, Title, Tooltip, Legend, TimeScale,
 } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import { Chart } from 'react-chartjs-2';
@@ -23,7 +23,7 @@ import type { Experiment, Measurement, AggBucket, Instrument, InstrumentSettings
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController,
-  Title, Tooltip, Legend, TimeScale, zoomPlugin,
+  Filler, Title, Tooltip, Legend, TimeScale, zoomPlugin,
 );
 
 interface Props {
@@ -107,6 +107,7 @@ export default function GraphsTab({ experimentId }: Props) {
   const [timeMin, setTimeMin] = useState<string | null>(null);
   const [timeMax, setTimeMax] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<[number, number]>([0, 100]);
+  const [committedTimeRange, setCommittedTimeRange] = useState<[number, number]>([0, 100]);
   const durationMs = useMemo(() => {
     if (!timeMin || !timeMax) return 0;
     return new Date(timeMax).getTime() - new Date(timeMin).getTime();
@@ -166,6 +167,7 @@ export default function GraphsTab({ experimentId }: Props) {
     setPage(1);
     setIntervalSec(0);
     setTimeRange([0, 100]);
+    setCommittedTimeRange([0, 100]);
     getExperimentAggData(selectedExpId, { max_points: chartPtsRef.current })
       .then((res) => {
         setExperiment(res.data.experiment);
@@ -214,8 +216,8 @@ export default function GraphsTab({ experimentId }: Props) {
 
     const minT = new Date(timeMin).getTime();
     const dur = durationMs || 1;
-    const fromTime = timeRange[0] > 0 ? new Date(minT + (timeRange[0] / 100) * dur).toISOString() : undefined;
-    const toTime = timeRange[1] < 100 ? new Date(minT + (timeRange[1] / 100) * dur).toISOString() : undefined;
+    const fromTime = committedTimeRange[0] > 0 ? new Date(minT + (committedTimeRange[0] / 100) * dur).toISOString() : undefined;
+    const toTime = committedTimeRange[1] < 100 ? new Date(minT + (committedTimeRange[1] / 100) * dur).toISOString() : undefined;
 
     try {
       if (viewMode === 'chart') {
@@ -238,7 +240,7 @@ export default function GraphsTab({ experimentId }: Props) {
     } finally {
       if (id === fetchRef.current) setLoading(false);
     }
-  }, [selectedExpId, timeMin, timeMax, durationMs, timeRange, step, page, perPage, viewMode]);
+  }, [selectedExpId, timeMin, timeMax, durationMs, committedTimeRange, step, page, perPage, viewMode]);
 
   const isInitial = useRef(true);
   useEffect(() => {
@@ -247,7 +249,7 @@ export default function GraphsTab({ experimentId }: Props) {
     return () => clearTimeout(timer);
   }, [fetchData]);
 
-  useEffect(() => { setPage(1); }, [timeRange, intervalSec, perPage, viewMode]);
+  useEffect(() => { setPage(1); }, [committedTimeRange, intervalSec, perPage, viewMode]);
 
   const toggleParam = (key: ParamKey) => {
     setActiveParams((prev) =>
@@ -288,19 +290,13 @@ export default function GraphsTab({ experimentId }: Props) {
     return labels;
   }, [aggByInstrument, instrumentIds, activeInstruments]);
 
-  // Decides how to render a param: 'bar' for current, 'line' (max) for source, 'line' for others
-  const paramChartType = (key: ParamKey): 'bar' | 'line' => {
-    return key === 'current' ? 'bar' : 'line';
-  };
-
-  // Build aggregate datasets for given params
+  // Build aggregate datasets for given params — filled area charts (no gaps)
   const makeAggDatasets = (params: ParamKey[]) => {
     const filteredInstIds = instrumentIds.filter((id) => activeInstruments.includes(id));
     const multiInst = filteredInstIds.length > 1;
     const datasets: any[] = [];
 
-    // For bar charts with multiple instruments: compute avg |max| per instrument
-    // so instruments with smaller average render behind (higher order = behind)
+    // Sort instruments: largest avg |current_max| renders first (behind)
     const instAvgAbs: Record<number, number> = {};
     if (multiInst) {
       filteredInstIds.forEach((instId) => {
@@ -311,14 +307,12 @@ export default function GraphsTab({ experimentId }: Props) {
         instAvgAbs[instId] = sum / bks.length;
       });
     }
-    // Sort: largest avg first (renders behind), smallest avg last (renders in front)
     const sortedInstIds = multiInst
       ? [...filteredInstIds].sort((a, b) => (instAvgAbs[b] || 0) - (instAvgAbs[a] || 0))
       : filteredInstIds;
 
-    sortedInstIds.forEach((instId, instIdx) => {
+    sortedInstIds.forEach((instId) => {
       const bks = aggByInstrument[instId] || [];
-      // For coloring, use original index to keep consistent colors per instrument
       const origIdx = filteredInstIds.indexOf(instId);
       const name = multiInst ? instName(instId) : '';
 
@@ -326,70 +320,80 @@ export default function GraphsTab({ experimentId }: Props) {
         const param = PARAMS.find((p) => p.key === key)!;
         const minKey = `${key}_min` as keyof AggBucket;
         const maxKey = `${key}_max` as keyof AggBucket;
-        const cType = paramChartType(key);
+        const isCurrent = key === 'current';
         const baseColor = multiInst && params.length === 1
           ? INST_COLORS[origIdx % INST_COLORS.length]
           : param.color;
         const label = name ? `${name}: ${param.short}` : param.label;
 
-        if (cType === 'bar') {
-          if (multiInst) {
-            // Multi-instrument: single floating bar [min, max] per instrument
-            // order: largest avg → higher order (behind), smallest avg → lower order (front)
-            datasets.push({
-              type: 'bar' as const,
-              label,
-              data: bks.map((b) => {
-                const mn = b[minKey] as number;
-                const mx = b[maxKey] as number;
-                if (Math.abs(mx) >= 999) return null;
-                return [mn, mx];
-              }),
-              backgroundColor: baseColor + '70',
-              borderColor: baseColor,
-              borderWidth: 0,
-              barPercentage: 1.0,
-              categoryPercentage: 1.0,
-              order: instIdx, // 0 = first sorted (largest) = behind, last = front
-            });
-          } else {
-            // Single instrument: two-color bar
-            // Color A: baseline [0 → min] (solid)
-            // Color B: spread  [min → max] (lighter)
-            datasets.push({
-              type: 'bar' as const,
-              label: `${param.label} (баз.)`,
-              data: bks.map((b) => {
-                const mn = b[minKey] as number;
-                if (Math.abs(mn) >= 999) return null;
-                return mn;
-              }),
-              backgroundColor: baseColor + 'bb',
-              borderColor: baseColor,
-              borderWidth: 0,
-              barPercentage: 1.0,
-              categoryPercentage: 1.0,
-              order: 2,
-            });
-            datasets.push({
-              type: 'bar' as const,
-              label: `${param.label} (макс.)`,
-              data: bks.map((b) => {
-                const mn = b[minKey] as number;
-                const mx = b[maxKey] as number;
-                if (Math.abs(mx) >= 999) return null;
-                return [mn, mx];
-              }),
-              backgroundColor: baseColor + '40',
-              borderColor: baseColor + '80',
-              borderWidth: 0,
-              barPercentage: 1.0,
-              categoryPercentage: 1.0,
-              order: 1,
-            });
-          }
+        if (isCurrent && !multiInst) {
+          // Single instrument current: two filled areas (0→min solid, min→max lighter)
+          datasets.push({
+            type: 'line' as const,
+            label: `${param.label} (баз.)`,
+            data: bks.map((b) => {
+              const mn = b[minKey] as number;
+              return Math.abs(mn) >= 999 ? null : mn;
+            }),
+            borderColor: baseColor,
+            backgroundColor: baseColor + 'aa',
+            borderWidth: 0,
+            pointRadius: 0,
+            tension: 0,
+            fill: 'origin',
+            spanGaps: true,
+            order: 2,
+          });
+          datasets.push({
+            type: 'line' as const,
+            label: `${param.label} (макс.)`,
+            data: bks.map((b) => {
+              const mx = b[maxKey] as number;
+              return Math.abs(mx) >= 999 ? null : mx;
+            }),
+            borderColor: baseColor + '60',
+            backgroundColor: baseColor + '35',
+            borderWidth: 0,
+            pointRadius: 0,
+            tension: 0,
+            fill: '-1',
+            spanGaps: true,
+            order: 1,
+          });
+        } else if (isCurrent && multiInst) {
+          // Multi-instrument current: one filled area [min→max] per instrument
+          datasets.push({
+            type: 'line' as const,
+            label: `${label} (min)`,
+            data: bks.map((b) => {
+              const mn = b[minKey] as number;
+              return Math.abs(mn) >= 999 ? null : mn;
+            }),
+            borderColor: 'transparent',
+            backgroundColor: 'transparent',
+            borderWidth: 0,
+            pointRadius: 0,
+            tension: 0,
+            fill: false,
+            spanGaps: true,
+          });
+          datasets.push({
+            type: 'line' as const,
+            label,
+            data: bks.map((b) => {
+              const mx = b[maxKey] as number;
+              return Math.abs(mx) >= 999 ? null : mx;
+            }),
+            borderColor: baseColor,
+            backgroundColor: baseColor + '50',
+            borderWidth: 0.5,
+            pointRadius: 0,
+            tension: 0,
+            fill: '-1',
+            spanGaps: true,
+          });
         } else {
-          // Line chart showing MAX value (for source, voltage, etc.)
+          // Other params: line chart showing MAX value
           datasets.push({
             type: 'line' as const,
             label,
@@ -426,13 +430,14 @@ export default function GraphsTab({ experimentId }: Props) {
     const dur = durationMs || 1;
     const newFrom = Math.max(0, Math.round(((visMin - tMin) / dur) * 100));
     const newTo = Math.min(100, Math.round(((visMax - tMin) / dur) * 100));
-    if (newFrom === timeRange[0] && newTo === timeRange[1]) return;
+    if (newFrom === committedTimeRange[0] && newTo === committedTimeRange[1]) return;
     // Reset chart zoom first (data will refill full width after fetch)
     chart.resetZoom();
     setTimeRange([newFrom, newTo]);
-  }, [timeMin, timeMax, durationMs, timeRange]);
+    setCommittedTimeRange([newFrom, newTo]);
+  }, [timeMin, timeMax, durationMs, committedTimeRange]);
 
-  const aggChartOptions = (title: string, hasBar: boolean) => ({
+  const aggChartOptions = (title: string) => ({
     responsive: true,
     maintainAspectRatio: false,
     animation: false as const,
@@ -440,6 +445,7 @@ export default function GraphsTab({ experimentId }: Props) {
     plugins: {
       legend: { display: true, position: 'top' as const, labels: { boxWidth: 14, font: { size: 11 } } },
       title: { display: !!title, text: title },
+      filler: { propagate: true },
       zoom: {
         pan: { enabled: true, mode: 'x' as const, onPanComplete: handleZoomPanComplete },
         zoom: {
@@ -451,13 +457,8 @@ export default function GraphsTab({ experimentId }: Props) {
       },
     },
     scales: {
-      x: {
-        ticks: { maxTicksLimit: 20, maxRotation: 45 },
-        ...(hasBar ? { stacked: true } : {}),
-      },
-      y: {
-        ...(hasBar ? { stacked: false } : {}),
-      },
+      x: { ticks: { maxTicksLimit: 20, maxRotation: 45 } },
+      y: {},
     },
   });
 
@@ -658,6 +659,7 @@ export default function GraphsTab({ experimentId }: Props) {
                 <Slider
                   value={timeRange}
                   onChange={(_, v) => setTimeRange(v as [number, number])}
+                  onChangeCommitted={(_, v) => setCommittedTimeRange(v as [number, number])}
                   valueLabelDisplay="auto"
                   valueLabelFormat={(v) => {
                     if (!timeMin) return '';
@@ -737,21 +739,20 @@ export default function GraphsTab({ experimentId }: Props) {
                     ref={combinedChartRef as any}
                     type="line"
                     data={{ labels: aggLabels, datasets: makeAggDatasets(activeParams) }}
-                    options={aggChartOptions('', activeParams.includes('current'))}
+                    options={aggChartOptions('')}
                   />
                 </Paper>
               ) : (
                 <Stack spacing={1.5}>
                   {activeParams.map((key) => {
                     const param = PARAMS.find((p) => p.key === key)!;
-                    const hasBar = paramChartType(key) === 'bar';
                     return (
                       <Paper key={key} sx={{ p: 1, height: { xs: 220, md: 300 } }}>
                         <Chart
                           ref={(ref: any) => { separateChartRefs.current[key] = ref ?? null; }}
-                          type={hasBar ? 'bar' : 'line'}
+                          type="line"
                           data={{ labels: aggLabels, datasets: makeAggDatasets([key]) }}
-                          options={aggChartOptions(param.label, hasBar)}
+                          options={aggChartOptions(param.label)}
                         />
                       </Paper>
                     );
