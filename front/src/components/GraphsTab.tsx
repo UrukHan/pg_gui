@@ -466,7 +466,7 @@ export default function GraphsTab({ experimentId }: Props) {
         callbacks: {
           label: (ctx: any) => {
             const label = ctx.dataset.label || '';
-            if (label.includes('(баз.)')) return null; // hide duplicate tooltip
+            if (label.includes('(баз.)')) return undefined; // hide duplicate tooltip
             const v = ctx.parsed?.y;
             return `${label}: ${fmtSci(v)}`;
           },
