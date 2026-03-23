@@ -272,15 +272,20 @@ export default function GraphsTab({ experimentId }: Props) {
     return map;
   }, [aggBuckets]);
 
-  // Labels from first active instrument's buckets
+  // Labels + raw timestamps from first active instrument's buckets
+  const aggTimestamps = useRef<number[]>([]);
   const aggLabels = useMemo(() => {
     const filteredIds = instrumentIds.filter((id) => activeInstruments.includes(id));
     const refId = filteredIds[0];
     const bks = refId != null ? (aggByInstrument[refId] || []) : [];
-    return bks.map((b) => {
+    const ts: number[] = [];
+    const labels = bks.map((b) => {
       const d = new Date(b.recorded_at);
+      ts.push(d.getTime());
       return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     });
+    aggTimestamps.current = ts;
+    return labels;
   }, [aggByInstrument, instrumentIds, activeInstruments]);
 
   // Decides how to render a param: 'bar' for current, 'line' (max) for source, 'line' for others
@@ -407,6 +412,26 @@ export default function GraphsTab({ experimentId }: Props) {
     return datasets;
   };
 
+  // When zoom/pan completes, map visible category range → time range → re-fetch
+  const handleZoomPanComplete = useCallback(({ chart }: { chart: ChartJS }) => {
+    const scale = chart.scales['x'];
+    if (!scale || !timeMin || !timeMax) return;
+    const ts = aggTimestamps.current;
+    if (ts.length === 0) return;
+    const minIdx = Math.max(0, Math.floor(scale.min));
+    const maxIdx = Math.min(ts.length - 1, Math.ceil(scale.max));
+    const visMin = ts[minIdx];
+    const visMax = ts[maxIdx];
+    const tMin = new Date(timeMin).getTime();
+    const dur = durationMs || 1;
+    const newFrom = Math.max(0, Math.round(((visMin - tMin) / dur) * 100));
+    const newTo = Math.min(100, Math.round(((visMax - tMin) / dur) * 100));
+    if (newFrom === timeRange[0] && newTo === timeRange[1]) return;
+    // Reset chart zoom first (data will refill full width after fetch)
+    chart.resetZoom();
+    setTimeRange([newFrom, newTo]);
+  }, [timeMin, timeMax, durationMs, timeRange]);
+
   const aggChartOptions = (title: string, hasBar: boolean) => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -416,8 +441,13 @@ export default function GraphsTab({ experimentId }: Props) {
       legend: { display: true, position: 'top' as const, labels: { boxWidth: 14, font: { size: 11 } } },
       title: { display: !!title, text: title },
       zoom: {
-        pan: { enabled: true, mode: 'x' as const },
-        zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' as const },
+        pan: { enabled: true, mode: 'x' as const, onPanComplete: handleZoomPanComplete },
+        zoom: {
+          wheel: { enabled: true },
+          pinch: { enabled: true },
+          mode: 'x' as const,
+          onZoomComplete: handleZoomPanComplete,
+        },
       },
     },
     scales: {
