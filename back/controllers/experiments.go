@@ -304,9 +304,9 @@ func ExportExperimentCSV(c *gin.Context) {
 	filename := fmt.Sprintf("experiment_%d.csv", id)
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-	// BOM for Excel UTF-8 detection
-	c.Writer.Write([]byte("\xEF\xBB\xBF"))
-	c.Writer.Write([]byte("id,experiment_id,instrument_id,recorded_at,voltage,current,charge,resistance,temperature,humidity,source,math_value,error_code\n"))
+	// BOM for Excel UTF-8 detection + sep hint for Excel auto-delimiter
+	c.Writer.Write([]byte("\xEF\xBB\xBFsep=;\n"))
+	c.Writer.Write([]byte("id;experiment_id;instrument_id;recorded_at;voltage;current;charge;resistance;temperature;humidity;source;math_value;error_code\n"))
 
 	const batchSize = 5000
 	var lastID uint = 0
@@ -318,7 +318,7 @@ func ExportExperimentCSV(c *gin.Context) {
 			break
 		}
 		for _, m := range rows {
-			line := fmt.Sprintf("%d,%d,%d,%s,%g,%g,%g,%g,%g,%g,%g,%g,%d\n",
+			line := fmt.Sprintf("%d;%d;%d;%s;%g;%g;%g;%g;%g;%g;%g;%g;%d\n",
 				m.ID, m.ExperimentID, m.InstrumentID,
 				m.RecordedAt.Format(time.RFC3339Nano),
 				m.Voltage, m.Current, m.Charge, m.Resistance,
