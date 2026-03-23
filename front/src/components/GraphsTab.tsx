@@ -327,39 +327,40 @@ export default function GraphsTab({ experimentId }: Props) {
 
         if (isCurrent) {
           // Layered fill: max area (lighter, behind) + min area (solid, on top)
-          // Max fill: 0→max (lighter color, drawn first = behind)
+          const instTag = `_inst${instId}`;
           datasets.push({
             type: 'line' as const,
-            label: multiInst ? label : `${param.label} (макс.)`,
+            label: `${label}__max`,
             data: bks.map((b) => {
               const mx = b[maxKey] as number;
               return Math.abs(mx) >= 999 ? null : mx;
             }),
-            borderColor: baseColor + '40',
-            backgroundColor: baseColor + '30',
+            borderColor: baseColor + '60',
+            backgroundColor: baseColor + '45',
             borderWidth: 0,
             pointRadius: 0,
             tension: 0,
             fill: 'origin',
             spanGaps: true,
             order: 10 + origIdx,
+            instTag,
           });
-          // Min fill: 0→min (solid color, drawn on top)
           datasets.push({
             type: 'line' as const,
-            label: multiInst ? `${label} (баз.)` : `${param.label} (баз.)`,
+            label: `${label}__min`,
             data: bks.map((b) => {
               const mn = b[minKey] as number;
               return Math.abs(mn) >= 999 ? null : mn;
             }),
             borderColor: baseColor,
-            backgroundColor: baseColor + 'aa',
+            backgroundColor: baseColor + 'cc',
             borderWidth: 0,
             pointRadius: 0,
             tension: 0,
             fill: 'origin',
             spanGaps: true,
             order: 5 + origIdx,
+            instTag,
           });
         } else {
           // Other params: line chart showing MAX value
@@ -437,16 +438,55 @@ export default function GraphsTab({ experimentId }: Props) {
         display: true, position: 'top' as const,
         labels: {
           boxWidth: 14, font: { size: 11 },
-          filter: (item: any) => !item.text?.includes('(баз.)'),
+          // Show only one entry per instrument/param — hide __min datasets
+          filter: (item: any) => !item.text?.includes('__min'),
+          // Clean display name: remove __max suffix
+          generateLabels: (chart: any) => {
+            return chart.data.datasets
+              .map((ds: any, i: number) => ({
+                text: (ds.label || '').replace('__max', '').replace('__min', ''),
+                fillStyle: ds.backgroundColor,
+                strokeStyle: ds.borderColor,
+                lineWidth: ds.borderWidth,
+                hidden: !chart.isDatasetVisible(i),
+                datasetIndex: i,
+              }))
+              .filter((item: any) => !item.text.endsWith('__min') && !(chart.data.datasets[item.datasetIndex]?.label || '').includes('__min'));
+          },
+        },
+        // Click toggles ALL datasets sharing same instTag (or same dataset if no tag)
+        onClick: (_e: any, legendItem: any, legend: any) => {
+          const chart = legend.chart;
+          const ci = legendItem.datasetIndex;
+          const ds = chart.data.datasets[ci];
+          const tag = ds?.instTag;
+          const willHide = chart.isDatasetVisible(ci);
+          if (tag) {
+            // Toggle all datasets with same instTag
+            chart.data.datasets.forEach((d: any, i: number) => {
+              if (d.instTag === tag) {
+                chart.getDatasetMeta(i).hidden = willHide;
+              }
+            });
+          } else {
+            chart.getDatasetMeta(ci).hidden = willHide;
+          }
+          chart.update();
         },
       },
       tooltip: {
         callbacks: {
           label: (ctx: any) => {
-            const label = ctx.dataset.label || '';
-            if (label.includes('(баз.)')) return undefined; // hide duplicate tooltip
-            const v = ctx.parsed?.y;
-            return `${label}: ${fmtSci(v)}`;
+            const label = (ctx.dataset.label || '') as string;
+            const cleanLabel = label.replace('__max', '').replace('__min', '');
+            // For __min datasets, show as "min" line
+            if (label.includes('__min')) {
+              return `${cleanLabel} мин: ${fmtSci(ctx.parsed?.y)}`;
+            }
+            if (label.includes('__max')) {
+              return `${cleanLabel} макс: ${fmtSci(ctx.parsed?.y)}`;
+            }
+            return `${cleanLabel}: ${fmtSci(ctx.parsed?.y)}`;
           },
         },
       },
